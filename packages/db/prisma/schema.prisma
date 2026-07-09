@@ -1,0 +1,256 @@
+// Жива Орг.Платформа — Prisma-схема (Фаза 1, Sheets-first)
+// pgvector: колонка embedding має тип vector(768) під Vertex text-embedding-004.
+// Схожість рахуємо raw-SQL (Prisma не типізує Unsupported-колонки).
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [vector]
+}
+
+// ── Перелічення ───────────────────────────────────────────
+enum OrgUnitType {
+  DIVISION // Відділення (×7)
+  DEPARTMENT // Відділ
+  SECTION // Секція
+  POST // Посада
+}
+
+enum MemberRole {
+  OWNER // власник / керівник компанії — доступ по всій компанії
+  HEAD // керівник відділення/відділу — доступ у межах свого відділу
+  EMPLOYEE // співробітник — свої інструкції
+}
+
+enum InstructionStatus {
+  DRAFT
+  ACTIVE
+}
+
+enum ProposalType {
+  INSTRUCTION_EDIT
+  NEW_DOC
+  STRUCTURE_CHANGE
+}
+
+enum ProposalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+// ── Компанія (тенант) ─────────────────────────────────────
+model Company {
+  id                String   @id @default(uuid())
+  name              String
+  abbr              String? // скорочення-префікс (напр. "LB")
+  driveRootFolderId String? // корінь папок компанії на Drive клієнта
+  orgSheetId        String? // Google Sheet з оргсхемою
+  googleAccountId   String? // прив'язаний OAuth Google-акаунт (для Drive/Sheets/Docs)
+
+  // Слоти під Фазу 3 (білінг) — поки не використовуються
+  subscriptionPlan   String?
+  subscriptionStatus String?
+  trialEndsAt        DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  orgUnits     OrgUnit[]
+  members      Member[]
+  botLinks     BotLink[]
+  processes    Process[]
+  instructions Instruction[]
+  driveFolders DriveFolder[]
+  proposals    Proposal[]
+  embeddings   InstructionEmbedding[]
+}
+
+// ── Оргсхема (джерело зв'язків; Google Sheet — дзеркало) ───
+model OrgUnit {
+  id        String      @id @default(uuid())
+  companyId String
+  company   Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  parentId  String?
+  parent    OrgUnit?    @relation("OrgUnitTree", fields: [parentId], references: [id])
+  children  OrgUnit[]   @relation("OrgUnitTree")
+  type      OrgUnitType
+  name      String
+  ckp       String? // Цінний Кінцевий Продукт
+  boardNo   Int? // номер на борду (відділення 1..7 / відділ 1..21)
+  orderNo   Int? // порядок серед сиблінгів
+
+  // Поля посади (type = POST)
+  holderName      String?
+  reportsToUnitId String?
+  reportsTo       OrgUnit?  @relation("PostReports", fields: [reportsToUnitId], references: [id])
+  reportsFrom     OrgUnit[] @relation("PostReports")
+  isVacant        Boolean   @default(false)
+
+  members      Member[]
+  instructions Instruction[]
+  ownedProcess Process[]     @relation("ProcessOwner")
+  driveFolder  DriveFolder?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([companyId])
+  @@index([parentId])
+  @@index([companyId, type])
+}
+
+// ── Учасник (людина в компанії, привʼязана до Telegram) ────
+model Member {
+  id             String     @id @default(uuid())
+  companyId      String
+  company        Company    @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  telegramUserId String?
+  fullName       String
+  role           MemberRole @default(EMPLOYEE)
+  postUnitId     String?
+  postUnit       OrgUnit?   @relation(fields: [postUnitId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  botLinks BotLink[]
+
+  @@unique([companyId, telegramUserId])
+  @@index([companyId])
+}
+
+// ── Deep-link коди для спільного бота платформи ────────────
+model BotLink {
+  code      String     @id
+  companyId String
+  company   Company    @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  memberId  String?
+  member    Member?    @relation(fields: [memberId], references: [id])
+  role      MemberRole @default(EMPLOYEE)
+  expiresAt DateTime?
+  createdAt DateTime   @default(now())
+
+  @@index([companyId])
+}
+
+// ── Бізнес-процеси ────────────────────────────────────────
+model Process {
+  id          String   @id @default(uuid())
+  companyId   String
+  company     Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  name        String
+  description String?
+  ownerUnitId String?
+  ownerUnit   OrgUnit? @relation("ProcessOwner", fields: [ownerUnitId], references: [id])
+  steps       Json? // впорядковані кроки процесу
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  instructions Instruction[]
+
+  @@index([companyId])
+}
+
+// ── Посадові інструкції (тіло — Google Doc на Drive) ───────
+model Instruction {
+  id         String            @id @default(uuid())
+  companyId  String
+  company    Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  postUnitId String?
+  postUnit   OrgUnit?          @relation(fields: [postUnitId], references: [id])
+  processId  String?
+  process    Process?          @relation(fields: [processId], references: [id])
+  title      String
+  driveDocId String? // Google Doc з текстом інструкції
+  folderPath String? // шлях теки на Drive
+  status     InstructionStatus @default(DRAFT)
+  version    Int               @default(1)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  linksFrom  InstructionLink[]      @relation("LinkSource")
+  linksTo    InstructionLink[]      @relation("LinkTarget")
+  embeddings InstructionEmbedding[]
+  proposals  Proposal[]
+
+  @@index([companyId])
+  @@index([postUnitId])
+}
+
+// ── Граф залежностей між інструкціями ─────────────────────
+model InstructionLink {
+  id                   String      @id @default(uuid())
+  instructionId        String
+  instruction          Instruction @relation("LinkSource", fields: [instructionId], references: [id], onDelete: Cascade)
+  relatedInstructionId String
+  related              Instruction @relation("LinkTarget", fields: [relatedInstructionId], references: [id], onDelete: Cascade)
+  relationType         String? // напр. "shared_process", "reports_to", "references"
+  weight               Float       @default(1)
+
+  createdAt DateTime @default(now())
+
+  @@unique([instructionId, relatedInstructionId])
+  @@index([relatedInstructionId])
+}
+
+// ── Ембединги інструкцій (pgvector) ───────────────────────
+model InstructionEmbedding {
+  id            String      @id @default(uuid())
+  companyId     String
+  company       Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  instructionId String
+  instruction   Instruction @relation(fields: [instructionId], references: [id], onDelete: Cascade)
+  chunkNo       Int
+  content       String
+  driveDocId    String?
+  // vector(768) під Vertex text-embedding-004; запити схожості — raw SQL
+  embedding     Unsupported("vector(768)")?
+
+  updatedAt DateTime @updatedAt
+
+  @@index([companyId])
+  @@index([instructionId])
+}
+
+// ── Мапа тек Drive ↔ оргсхема ─────────────────────────────
+model DriveFolder {
+  id            String  @id @default(uuid())
+  companyId     String
+  company       Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  orgUnitId     String  @unique
+  orgUnit       OrgUnit @relation(fields: [orgUnitId], references: [id], onDelete: Cascade)
+  path          String
+  driveFolderId String
+
+  createdAt DateTime @default(now())
+
+  @@index([companyId])
+}
+
+// ── Пропозиції змін (ШІ пропонує → людина підтверджує) ─────
+model Proposal {
+  id                  String         @id @default(uuid())
+  companyId           String
+  company             Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  type                ProposalType
+  targetInstructionId String?
+  targetInstruction   Instruction?   @relation(fields: [targetInstructionId], references: [id])
+  payload             Json // деталі зміни (діф, новий текст, класифікація тощо)
+  status              ProposalStatus @default(PENDING)
+  createdBy           String? // memberId ініціатора
+  approvedBy          String? // memberId, хто підтвердив/відхилив
+
+  createdAt  DateTime  @default(now())
+  decidedAt  DateTime?
+
+  @@index([companyId, status])
+  @@index([targetInstructionId])
+}

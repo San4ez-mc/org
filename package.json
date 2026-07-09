@@ -1,0 +1,35 @@
+{
+  "name": "zhiva-org-platform",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Жива Орг.Платформа — орг.структура + бізнес-процеси + посадові інструкції як живий організм",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:api": "yarn workspace @platform/api dev",
+    "dev:worker": "yarn workspace @platform/worker dev",
+    "build": "tsc --build",
+    "db:generate": "yarn workspace @platform/db generate",
+    "db:migrate": "yarn workspace @platform/db migrate:dev",
+    "db:deploy": "yarn workspace @platform/db migrate:deploy",
+    "db:studio": "yarn workspace @platform/db studio",
+    "typecheck": "tsc --build --dry",
+    "auth:google": "tsx scripts/google-auth.ts",
+    "smoke:drive": "tsx scripts/drive-smoke.ts",
+    "create:company": "tsx scripts/create-company.ts"
+  },
+  "devDependencies": {
+    "@platform/drive": "0.1.0",
+    "@platform/org-template": "0.1.0",
+    "dotenv": "^16.4.5",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "yarn": ">=1.22.0"
+  },
+  "packageManager": "yarn@1.22.22"
+}

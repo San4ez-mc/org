@@ -1,0 +1,10 @@
+{
+  "files": [],
+  "references": [
+    { "path": "packages/db" },
+    { "path": "packages/org-template" },
+    { "path": "packages/drive" },
+    { "path": "apps/api" },
+    { "path": "apps/worker" }
+  ]
+}
