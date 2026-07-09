@@ -20,3 +20,7 @@ _refs/
 
 # TS build info
 *.tsbuildinfo
+
+# Next.js
+.next/
+next-env.d.ts

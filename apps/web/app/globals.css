@@ -1,0 +1,32 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Темна тема за замовчуванням (як flows). Змінні у стилі shadcn/ui. */
+:root {
+  --background: 240 10% 6%;
+  --foreground: 0 0% 96%;
+  --card: 240 8% 9%;
+  --card-foreground: 0 0% 96%;
+  --muted: 240 5% 15%;
+  --muted-foreground: 240 5% 65%;
+  --border: 240 5% 18%;
+  --primary: 0 72% 51%;
+  --primary-foreground: 0 0% 100%;
+  --radius: 0.6rem;
+}
+
+* {
+  border-color: hsl(var(--border));
+}
+body {
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
+  font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+}
+
+/* PAEI-кольори Адізеса (для бейджів у оргсхемі) */
+.paei-P { background: #f2caca; color: #7a1f1f; }
+.paei-A { background: #ccd9f5; color: #1f3a7a; }
+.paei-E { background: #d1efd1; color: #1f5a26; }
+.paei-I { background: #fff0bf; color: #6b5310; }
