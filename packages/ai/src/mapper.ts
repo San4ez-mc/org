@@ -1,4 +1,4 @@
-import { callClaude } from './claude';
+import { callClaude, callClaudeJson } from './claude';
 
 export interface OnboardingAnswers {
   business?: string;
@@ -29,6 +29,35 @@ ${kb}
 3. Баланс PAEI: чого бракує (P/A/E/I) і на що звернути увагу.
 Пиши конкретно під цей бізнес, без загальних фраз. Без вступів і висновків — одразу по суті.`;
   return callClaude(prompt, { system: SYSTEM, maxTokens: 2000, temperature: 0.5 });
+}
+
+export interface MappedPost {
+  boardNo: number; // 1..7 — відділення
+  title: string;
+  ckp: string;
+  paei?: 'P' | 'A' | 'E' | 'I';
+  holderName?: string;
+}
+
+export interface MappedStructure {
+  companyName: string;
+  posts: MappedPost[];
+}
+
+const DIVISIONS_HINT =
+  '1 Побудови (персонал/найм/HR), 2 Поширення (маркетинг+продажі), 3 Фінансове (дохід/розхід/облік), 4 Технічне (виробництво продукту чи послуги), 5 Кваліфікації (якість/навчання), 6 По роботі з публікою (PR/партнери), 7 Адміністративне (керівництво/стратегія)';
+
+/** Розкладає реальні посади бізнесу на 7 відділень (мапінг на канонічний борд). */
+export async function mapBusinessToStructure(answers: OnboardingAnswers, knowledgeContext = ''): Promise<MappedStructure> {
+  const kb = knowledgeContext ? `\nМЕТОДОЛОГІЯ (спирайся на неї при мапінгу):\n${knowledgeContext}\n` : '';
+  const prompt = `Дані про бізнес:
+${JSON.stringify(answers, null, 2)}
+${kb}
+Признач КОЖНУ реальну посаду цього бізнесу на одне з 7 відділень за boardNo: ${DIVISIONS_HINT}.
+Поверни ТІЛЬКИ JSON без тексту навколо:
+{ "companyName": "коротка назва", "posts": [ { "boardNo": 2, "title": "Таргетолог", "ckp": "короткий ЦКП", "paei": "P", "holderName": "" } ] }
+Правила: конкретні посади саме цього бізнесу (Таргетолог, Копірайтер, Проджект-менеджер...), не загальні відділи. ЦКП — стисло. paei — одна з P/A/E/I. holderName з ролей, якщо відоме, інакше "". Якщо на посаді кілька людей — один запис на посаду.`;
+  return callClaudeJson<MappedStructure>(prompt, { system: SYSTEM, maxTokens: 1500, temperature: 0.3 });
 }
 
 /** Пропонує коротку назву компанії з опису бізнесу (для назви папки). */

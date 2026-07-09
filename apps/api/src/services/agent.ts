@@ -1,6 +1,7 @@
 import { prisma } from '@platform/db';
-import { buildCompanyStructure, ensureDoc, appendSheetValues } from '@platform/drive';
-import { companyStarterNotes, suggestCompanyName, type OnboardingAnswers } from '@platform/ai';
+import { buildCompanyStructure, addCompanyPost, ensureDoc, appendSheetValues } from '@platform/drive';
+import { companyStarterNotes, mapBusinessToStructure, type OnboardingAnswers } from '@platform/ai';
+import { CANONICAL_DIVISIONS } from '@platform/org-template';
 import { knowledgeContextFor } from './knowledge';
 
 export interface AgentIntent {
@@ -58,39 +59,74 @@ async function onboardingGenerate(answers: OnboardingAnswers, ctx: AgentContext)
 }
 
 async function buildAndNotify(answers: OnboardingAnswers, ctx: AgentContext, root: string): Promise<void> {
-  const name = await suggestCompanyName(answers);
-  // Підтягуємо методологію з бази знань, щоб рекомендації були обґрунтовані
+  // Методологія з бази знань — для мапінгу і рекомендацій
   const kb = await knowledgeContextFor(
     `${answers.business ?? ''} ${(answers.functions ?? []).join(' ')} орг структура посади ЦКП`,
     5,
   ).catch(() => '');
+
+  // ШІ розкладає реальні посади на 7 відділень
+  const spec = await mapBusinessToStructure(answers, kb);
+  const name = spec.companyName?.trim() || 'Нова компанія';
   const notes = await companyStarterNotes(answers, kb);
 
+  // Канонічний каркас + тейлоровані посади на Drive
   const built = await buildCompanyStructure(root, name);
   await ensureDoc(built.companyFolderId, 'Рекомендації під твій бізнес', notes);
+  for (const p of spec.posts) {
+    try {
+      await addCompanyPost(built.companyFolderId, p.boardNo, p.title, p.ckp);
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn('[agent] посада не створилась:', p.title, (err as Error).message);
+    }
+  }
   await appendSheetValues(built.journalSheetId, [
-    [nowStamp(), 'Створено компанію', name, 'Канонічна структура + рекомендації під бізнес', ctx.telegramId ?? ''],
+    [nowStamp(), 'Створено компанію', name, `Структура + ${spec.posts.length} посад під бізнес`, ctx.telegramId ?? ''],
   ]);
 
+  // Персист у БД: компанія + відділення + тейлоровані посади
   try {
-    await prisma.company.create({
+    const company = await prisma.company.create({
       data: { name, driveRootFolderId: built.companyFolderId, orgSheetId: built.orgSheetId },
+      select: { id: true },
     });
+    for (const div of CANONICAL_DIVISIONS) {
+      const divUnit = await prisma.orgUnit.create({
+        data: { companyId: company.id, type: 'DIVISION', name: div.name, boardNo: div.boardNo, ckp: div.ckp },
+        select: { id: true },
+      });
+      for (const p of spec.posts.filter((x) => x.boardNo === div.boardNo)) {
+        await prisma.orgUnit.create({
+          data: {
+            companyId: company.id,
+            parentId: divUnit.id,
+            type: 'POST',
+            name: p.title,
+            ckp: p.ckp,
+            holderName: p.holderName || null,
+            isVacant: !p.holderName,
+          },
+        });
+      }
+    }
   } catch (err) {
     // eslint-disable-next-line no-console
-    console.warn('[agent] не вдалось зберегти компанію в БД:', (err as Error).message);
+    console.warn('[agent] не вдалось зберегти структуру в БД:', (err as Error).message);
   }
 
+  const postsList = spec.posts.map((p) => `• ${p.title}`).join('\n');
   const finalReply = [
     `✅ Готово! Побудував структуру компанії «${name}» на твоєму Google Drive.`,
     ``,
-    `Усередині: 7 відділень → відділи → посадові папки з інструкціями (оригінали — у Відділенні побудови, у папках посад — ярлики), Робочі папки з Архівом, і дашборд (Оргсхема з PAEI-кольорами, Персонал, Журнал).`,
+    `Розклав твої посади по відділеннях:`,
+    postsList,
     ``,
-    `Ще додав документ «Рекомендації під твій бізнес» — які посади й процеси тобі реально потрібні.`,
+    `Оригінали інструкцій — у Відділенні побудови, у папках посад — ярлики (зміниш оригінал — оновиться в усіх). Плюс Робочі папки з Архівом і дашборд (Оргсхема з PAEI-кольорами, Персонал, Журнал), а також документ «Рекомендації під твій бізнес».`,
     ``,
     `📂 ${built.url}`,
     ``,
-    `Далі можемо додати конкретні посади, процеси чи призначити людей — просто напиши, що робимо.`,
+    `Далі можемо додати процеси, призначити людей або відкоригувати посади — просто напиши.`,
   ].join('\n');
 
   if (ctx.telegramId) await sendTelegram(ctx.telegramId, finalReply);

@@ -71,6 +71,27 @@ async function buildPostUnit(containerFolderId: string, originalsRootId: string,
   return postFolder;
 }
 
+/**
+ * Додати бізнес-специфічну посаду під відповідне відділення (за boardNo).
+ * Оригінал інструкції — у Побудові, у папці посади — ярлик. Ідемпотентно.
+ */
+export async function addCompanyPost(
+  companyFolderId: string,
+  boardNo: number,
+  title: string,
+  ckp: string,
+): Promise<string> {
+  const div = CANONICAL_DIVISIONS.find((d) => d.boardNo === boardNo) ?? CANONICAL_DIVISIONS.find((d) => d.boardNo === 7)!;
+  const divisionLabel = `${div.boardNo}. ${div.name}`;
+  const divFolder = await ensureFolder(companyFolderId, divisionLabel);
+
+  const pobudova = CANONICAL_DIVISIONS.find((d) => d.boardNo === 1)!;
+  const pobudovaFolder = await ensureFolder(companyFolderId, `${pobudova.boardNo}. ${pobudova.name}`);
+  const originalsRoot = await ensureFolder(pobudovaFolder, INSTRUCTIONS_ORIGINALS_FOLDER);
+
+  return buildPostUnit(divFolder, originalsRoot, { divisionLabel, deptName: null, postName: title, ckp });
+}
+
 export interface BuildResult {
   companyFolderId: string;
   url: string;
