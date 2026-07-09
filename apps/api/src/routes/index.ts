@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { prisma } from '@platform/db';
 import { requireApiSecret } from '../middleware/auth';
 import { handleAct } from '../services/agent';
 
@@ -37,10 +38,38 @@ api.post('/agent/act', async (req, res) => {
   }
 });
 
+// Список компаній (для веб-пульта Ф2)
+api.get('/companies', async (_req, res) => {
+  try {
+    const companies = await prisma.company.findMany({
+      orderBy: { createdAt: 'desc' },
+      select: { id: true, name: true, abbr: true, driveRootFolderId: true, orgSheetId: true, createdAt: true },
+    });
+    res.json({ companies });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+// Одна компанія + орг-одиниці (для сторінки компанії)
+api.get('/companies/:id', async (req, res) => {
+  try {
+    const company = await prisma.company.findUnique({
+      where: { id: req.params.id },
+      include: { orgUnits: { orderBy: [{ boardNo: 'asc' }, { orderNo: 'asc' }] } },
+    });
+    if (!company) {
+      res.status(404).json({ error: 'Компанію не знайдено' });
+      return;
+    }
+    res.json({ company });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
 // Онбординг (legacy-контракт — залишено як заглушки)
 api.post('/onboarding/answer', notImplemented('onboarding.answer'));
-api.post('/onboarding/generate', notImplemented('onboarding.generate'));
-api.get('/companies/:id/summary', notImplemented('companies.summary'));
 
 // Інструкції та розповсюдження змін
 api.post('/instructions/:id/edit', notImplemented('instructions.edit'));
