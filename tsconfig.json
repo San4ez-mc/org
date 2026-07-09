@@ -3,6 +3,7 @@
   "references": [
     { "path": "packages/db" },
     { "path": "packages/org-template" },
+    { "path": "packages/ai" },
     { "path": "packages/drive" },
     { "path": "apps/api" },
     { "path": "apps/worker" }

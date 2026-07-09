@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { requireApiSecret } from '../middleware/auth';
+import { handleAct } from '../services/agent';
 
 /**
  * Контракт API платформи (§8 PLAN_PHASE1.md).
@@ -16,7 +17,27 @@ const notImplemented = (name: string) => (_: unknown, res: any) =>
 // Deep-link підключення до спільного бота
 api.post('/bot/link/resolve', notImplemented('bot.link.resolve'));
 
-// Онбординг
+// Головний ендпойнт агента: приймає intent від бота-воронки
+api.post('/agent/act', async (req, res) => {
+  try {
+    const intent = req.body?.intent;
+    if (!intent?.action) {
+      res.status(400).json({ error: 'Очікується { intent: { action, params } }' });
+      return;
+    }
+    const result = await handleAct(intent, {
+      telegramId: req.body?.telegramId ? String(req.body.telegramId) : undefined,
+      companyId: req.body?.companyId || undefined,
+    });
+    res.json(result);
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error('[agent/act] помилка:', err);
+    res.status(500).json({ reply: 'Сталася помилка під час виконання дії. Спробуй ще раз пізніше.' });
+  }
+});
+
+// Онбординг (legacy-контракт — залишено як заглушки)
 api.post('/onboarding/answer', notImplemented('onboarding.answer'));
 api.post('/onboarding/generate', notImplemented('onboarding.generate'));
 api.get('/companies/:id/summary', notImplemented('companies.summary'));

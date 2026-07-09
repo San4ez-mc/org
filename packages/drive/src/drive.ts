@@ -131,6 +131,24 @@ export async function writeSheetValues(spreadsheetId: string, values: (string | 
   );
 }
 
+/** Дозаписати рядки в кінець таблиці (для Журналу). */
+export async function appendSheetValues(
+  spreadsheetId: string,
+  values: (string | number)[][],
+  range = 'A1',
+): Promise<void> {
+  const sheets = getSheets();
+  await withRetry(() =>
+    sheets.spreadsheets.values.append({
+      spreadsheetId,
+      range,
+      valueInputOption: 'RAW',
+      insertDataOption: 'INSERT_ROWS',
+      requestBody: { values },
+    }),
+  );
+}
+
 export interface RowColor {
   startRow: number; // 0-based, включно
   endRow: number; // 0-based, виключно

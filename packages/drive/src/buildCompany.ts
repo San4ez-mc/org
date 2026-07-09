@@ -74,6 +74,9 @@ async function buildPostUnit(containerFolderId: string, originalsRootId: string,
 export interface BuildResult {
   companyFolderId: string;
   url: string;
+  orgSheetId: string;
+  staffSheetId: string;
+  journalSheetId: string;
 }
 
 /**
@@ -144,5 +147,11 @@ export async function buildCompanyStructure(rootId: string, companyName: string)
     }
   }
 
-  return { companyFolderId: company, url: driveFolderUrl(company) };
+  return {
+    companyFolderId: company,
+    url: driveFolderUrl(company),
+    orgSheetId: orgSheet,
+    staffSheetId: staffSheet,
+    journalSheetId: journalSheet,
+  };
 }
