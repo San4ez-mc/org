@@ -19,7 +19,9 @@ app.get('/health', async (_req, res) => {
 app.use('/api', api);
 
 const port = Number(process.env.PORT ?? 4000);
-app.listen(port, () => {
+// Слухаємо лише локально: API кличе бот-воронка з того ж сервера. Зовні не видно.
+const host = process.env.API_HOST ?? '127.0.0.1';
+app.listen(port, host, () => {
   // eslint-disable-next-line no-console
-  console.log(`[api] Жива Орг.Платформа слухає на :${port}`);
+  console.log(`[api] Жива Орг.Платформа слухає на ${host}:${port}`);
 });
