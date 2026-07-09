@@ -173,6 +173,61 @@ export async function setRowBackground(
   await withRetry(() => sheets.spreadsheets.batchUpdate({ spreadsheetId, requestBody: { requests } }));
 }
 
+export interface DriveFileInfo {
+  id: string;
+  name: string;
+  mimeType: string;
+}
+
+/** Перелік файлів (не тек) у теці — рекурсивно по підтеках. */
+export async function listFolderFiles(folderId: string): Promise<DriveFileInfo[]> {
+  const drive = getDrive();
+  const out: DriveFileInfo[] = [];
+  const walk = async (id: string) => {
+    let pageToken: string | undefined;
+    do {
+      const res = await withRetry(() =>
+        drive.files.list({
+          q: `'${id}' in parents and trashed = false`,
+          fields: 'nextPageToken, files(id, name, mimeType)',
+          pageSize: 200,
+          pageToken,
+          ...SHARED_DRIVE_PARAMS,
+        }),
+      );
+      for (const f of res.data.files ?? []) {
+        if (f.mimeType === FOLDER_MIME) await walk(f.id!);
+        else out.push({ id: f.id!, name: f.name!, mimeType: f.mimeType! });
+      }
+      pageToken = res.data.nextPageToken ?? undefined;
+    } while (pageToken);
+  };
+  await walk(folderId);
+  return out;
+}
+
+/** Прочитати текст файлу: Google Doc → export text/plain; text/* → media. Інакше null. */
+export async function readFileText(file: DriveFileInfo): Promise<string | null> {
+  const drive = getDrive();
+  try {
+    if (file.mimeType === DOC_MIME) {
+      const res = await withRetry(() =>
+        drive.files.export({ fileId: file.id, mimeType: 'text/plain' }, { responseType: 'text' }),
+      );
+      return String(res.data ?? '').trim() || null;
+    }
+    if (file.mimeType.startsWith('text/')) {
+      const res = await withRetry(() =>
+        drive.files.get({ fileId: file.id, alt: 'media', ...SHARED_DRIVE_PARAMS }, { responseType: 'text' }),
+      );
+      return String(res.data ?? '').trim() || null;
+    }
+    return null; // pdf/docx/інше — поки пропускаємо
+  } catch {
+    return null;
+  }
+}
+
 export function driveFolderUrl(id: string): string {
   return `https://drive.google.com/drive/folders/${id}`;
 }

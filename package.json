@@ -18,9 +18,12 @@
     "typecheck": "tsc --build --dry",
     "auth:google": "tsx scripts/google-auth.ts",
     "smoke:drive": "tsx scripts/drive-smoke.ts",
-    "create:company": "tsx scripts/create-company.ts"
+    "create:company": "tsx scripts/create-company.ts",
+    "index:knowledge": "tsx scripts/index-knowledge.ts"
   },
   "devDependencies": {
+    "@platform/ai": "0.1.0",
+    "@platform/db": "0.1.0",
     "@platform/drive": "0.1.0",
     "@platform/org-template": "0.1.0",
     "dotenv": "^16.4.5",

@@ -16,10 +16,13 @@ const SYSTEM = `Ти — консультант з орг.структури, щ
  * Генерує тейлоровані під конкретний бізнес рекомендації (Markdown-текст),
  * які лягають окремим документом у папку компанії і згадуються у відповіді бота.
  */
-export async function companyStarterNotes(answers: OnboardingAnswers): Promise<string> {
+export async function companyStarterNotes(answers: OnboardingAnswers, knowledgeContext = ''): Promise<string> {
+  const kb = knowledgeContext
+    ? `\nМЕТОДОЛОГІЧНИЙ КОНТЕКСT (спирайся на нього, коли пояснюєш ЧОМУ так):\n${knowledgeContext}\n`
+    : '';
   const prompt = `Ось дані про бізнес (з опитування):
 ${JSON.stringify(answers, null, 2)}
-
+${kb}
 Створи стислий стартовий документ «Рекомендації під твій бізнес» у Markdown. Розділи:
 1. Які посади реально потрібні цьому бізнесу (по відділеннях 1–7), з коротким ЦКП кожної. Не вигадуй зайвих — лише те, що випливає з бізнесу.
 2. 2–4 ключових бізнес-процеси (потоки цінності) — назва + кроки через посади.

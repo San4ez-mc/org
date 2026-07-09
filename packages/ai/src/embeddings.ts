@@ -14,17 +14,20 @@ export function embeddingsProvider(): EmbeddingsProvider {
 
 /** Розмірність вектора активного провайдера (має збігатися з колонкою pgvector). */
 export function embeddingDim(): number {
-  return embeddingsProvider() === 'vertex' ? 768 : Number(process.env.EMBEDDING_DIM ?? 1536);
+  // Тримаємо 768 для обох провайдерів → одна колонка pgvector, безшовний перехід.
+  return Number(process.env.EMBEDDING_DIM ?? 768);
 }
 
 async function embedOpenAI(texts: string[]): Promise<number[][]> {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) throw new Error('OPENAI_API_KEY не задано (для embeddings)');
   const model = process.env.OPENAI_EMBEDDING_MODEL ?? 'text-embedding-3-small';
+  // text-embedding-3-small підтримує зменшення розмірності — тримаємо 768,
+  // щоб колонка pgvector була однакова для OpenAI і Vertex (легкий перехід).
   const res = await fetch('https://api.openai.com/v1/embeddings', {
     method: 'POST',
     headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model, input: texts }),
+    body: JSON.stringify({ model, input: texts, dimensions: embeddingDim() }),
   });
   if (!res.ok) throw new Error(`OpenAI embeddings ${res.status}: ${(await res.text()).slice(0, 200)}`);
   const data = (await res.json()) as { data: { embedding: number[] }[] };

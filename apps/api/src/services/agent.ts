@@ -1,6 +1,7 @@
 import { prisma } from '@platform/db';
 import { buildCompanyStructure, ensureDoc, appendSheetValues } from '@platform/drive';
 import { companyStarterNotes, suggestCompanyName, type OnboardingAnswers } from '@platform/ai';
+import { knowledgeContextFor } from './knowledge';
 
 export interface AgentIntent {
   action: string;
@@ -58,7 +59,12 @@ async function onboardingGenerate(answers: OnboardingAnswers, ctx: AgentContext)
 
 async function buildAndNotify(answers: OnboardingAnswers, ctx: AgentContext, root: string): Promise<void> {
   const name = await suggestCompanyName(answers);
-  const notes = await companyStarterNotes(answers);
+  // Підтягуємо методологію з бази знань, щоб рекомендації були обґрунтовані
+  const kb = await knowledgeContextFor(
+    `${answers.business ?? ''} ${(answers.functions ?? []).join(' ')} орг структура посади ЦКП`,
+    5,
+  ).catch(() => '');
+  const notes = await companyStarterNotes(answers, kb);
 
   const built = await buildCompanyStructure(root, name);
   await ensureDoc(built.companyFolderId, 'Рекомендації під твій бізнес', notes);

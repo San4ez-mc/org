@@ -235,6 +235,21 @@ model DriveFolder {
   @@index([companyId])
 }
 
+// ── База знань по орг.структурі (глобальна, RAG) ──────────
+// Статті-методологія (Хаббард, Адізес, принципи ЦКП тощо) для обґрунтування
+// рішень бота. Не привʼязана до компанії. Розмірність 768 (OpenAI/Vertex).
+model KnowledgeChunk {
+  id          String                      @id @default(uuid())
+  source      String // назва статті / файлу
+  driveFileId String?
+  chunkNo     Int
+  content     String
+  embedding   Unsupported("vector(768)")?
+  updatedAt   DateTime                    @updatedAt
+
+  @@index([driveFileId])
+}
+
 // ── Пропозиції змін (ШІ пропонує → людина підтверджує) ─────
 model Proposal {
   id                  String         @id @default(uuid())
