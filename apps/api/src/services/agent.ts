@@ -41,6 +41,22 @@ async function onboardingGenerate(answers: OnboardingAnswers, ctx: AgentContext)
   const root = process.env.DRIVE_ROOT_FOLDER_ID;
   if (!root) throw new Error('DRIVE_ROOT_FOLDER_ID не задано');
 
+  // Побудова структури триває кілька хвилин — не тримаємо HTTP-запит бота.
+  // Запускаємо у фоні, а готове посилання надсилаємо в Telegram по завершенні.
+  void buildAndNotify(answers, ctx, root).catch((err) => {
+    // eslint-disable-next-line no-console
+    console.error('[agent] фонова побудова впала:', err);
+    if (ctx.telegramId) {
+      void sendTelegram(ctx.telegramId, '⚠️ Сталася помилка під час побудови структури. Ми вже дивимось — спробуй трохи згодом.');
+    }
+  });
+
+  return {
+    reply: '🛠 Прийняв! Будую структуру твоєї компанії на Google Drive — це займе 2–3 хвилини. Щойно все буде готово, надішлю сюди посилання. ✨',
+  };
+}
+
+async function buildAndNotify(answers: OnboardingAnswers, ctx: AgentContext, root: string): Promise<void> {
   const name = await suggestCompanyName(answers);
   const notes = await companyStarterNotes(answers);
 
@@ -50,20 +66,16 @@ async function onboardingGenerate(answers: OnboardingAnswers, ctx: AgentContext)
     [nowStamp(), 'Створено компанію', name, 'Канонічна структура + рекомендації під бізнес', ctx.telegramId ?? ''],
   ]);
 
-  // Персистенція в БД (не блокує успіх на Drive)
-  let companyId: string | undefined;
   try {
-    const company = await prisma.company.create({
+    await prisma.company.create({
       data: { name, driveRootFolderId: built.companyFolderId, orgSheetId: built.orgSheetId },
-      select: { id: true },
     });
-    companyId = company.id;
   } catch (err) {
     // eslint-disable-next-line no-console
     console.warn('[agent] не вдалось зберегти компанію в БД:', (err as Error).message);
   }
 
-  const reply = [
+  const finalReply = [
     `✅ Готово! Побудував структуру компанії «${name}» на твоєму Google Drive.`,
     ``,
     `Усередині: 7 відділень → відділи → посадові папки з інструкціями (оригінали — у Відділенні побудови, у папках посад — ярлики), Робочі папки з Архівом, і дашборд (Оргсхема з PAEI-кольорами, Персонал, Журнал).`,
@@ -75,7 +87,22 @@ async function onboardingGenerate(answers: OnboardingAnswers, ctx: AgentContext)
     `Далі можемо додати конкретні посади, процеси чи призначити людей — просто напиши, що робимо.`,
   ].join('\n');
 
-  return { reply, companyId };
+  if (ctx.telegramId) await sendTelegram(ctx.telegramId, finalReply);
+}
+
+async function sendTelegram(chatId: string, text: string): Promise<void> {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  if (!token) return;
+  try {
+    await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: chatId, text }),
+    });
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.warn('[agent] sendTelegram помилка:', (err as Error).message);
+  }
 }
 
 async function status(ctx: AgentContext): Promise<AgentResult> {
