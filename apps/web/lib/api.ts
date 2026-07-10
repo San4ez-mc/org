@@ -33,6 +33,7 @@ export interface Process {
   name: string;
   description: string | null;
   steps: ProcessStep[] | null;
+  diagram: string | null;
 }
 
 export interface CompanyDetail extends Company {

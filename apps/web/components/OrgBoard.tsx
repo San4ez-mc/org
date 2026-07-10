@@ -28,6 +28,15 @@ export default function OrgBoard({ units }: { units: OrgUnit[] }) {
         <span style={{ fontSize: 13, color: 'hsl(var(--muted-foreground))', width: 44, textAlign: 'center' }}>{Math.round(scale * 100)}%</span>
         <button style={btn} onClick={() => setScale((s) => Math.min(1.6, +(s + 0.1).toFixed(2)))} title="Збільшити">+</button>
         <button style={{ ...btn, width: 'auto', padding: '0 10px', fontSize: 12 }} onClick={() => setScale(1)}>Скинути</button>
+
+        {/* Легенда PAEI (Адізес) */}
+        <div style={{ display: 'flex', gap: 10, marginLeft: 'auto', flexWrap: 'wrap' }}>
+          {([['P', 'Виробник'], ['A', 'Адміністратор'], ['E', 'Підприємець'], ['I', 'Інтегратор']] as const).map(([r, n]) => (
+            <span key={r} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: 'hsl(var(--muted-foreground))' }}>
+              <span style={{ width: 10, height: 10, borderRadius: 3, background: PAEI_COLOR[r] }} /> {r} · {n}
+            </span>
+          ))}
+        </div>
       </div>
 
       {/* Полотно борду (горизонтальний скрол) */}

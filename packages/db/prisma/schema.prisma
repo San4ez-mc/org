@@ -148,7 +148,8 @@ model Process {
   description String?
   ownerUnitId String?
   ownerUnit   OrgUnit? @relation("ProcessOwner", fields: [ownerUnitId], references: [id])
-  steps       Json? // впорядковані кроки процесу
+  steps       Json? // впорядковані кроки процесу (лінійний підсумок)
+  diagram     String? // Mermaid-діаграма swimlane (лейни = відповідальні)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

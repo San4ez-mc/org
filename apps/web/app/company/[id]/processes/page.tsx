@@ -1,5 +1,6 @@
 import { getCompany, type OrgUnit } from '@/lib/api';
 import CompanyTabs from '@/components/CompanyTabs';
+import MermaidView from '@/components/MermaidView';
 
 export const dynamic = 'force-dynamic';
 
@@ -40,7 +41,14 @@ export default async function ProcessesPage({ params }: { params: { id: string }
                 </div>
                 {pr.description && <div style={{ fontSize: 12.5, ...muted, margin: '6px 0 14px' }}>{pr.description}</div>}
 
-                {/* Swimlane: рядок на крок */}
+                {/* Swimlane-діаграма */}
+                {pr.diagram && (
+                  <div style={{ border: '1px solid hsl(var(--border))', borderRadius: 8, padding: 12, marginBottom: 14, background: 'hsl(var(--background))' }}>
+                    <MermaidView code={pr.diagram} id={pr.id} />
+                  </div>
+                )}
+
+                {/* Кроки списком */}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
                   {steps.map((s, i) => (
                     <div key={i} style={{ display: 'grid', gridTemplateColumns: '28px 200px 1fr', gap: 12, alignItems: 'start', padding: '10px 0', borderTop: i ? '1px dashed hsl(var(--border))' : 'none' }}>

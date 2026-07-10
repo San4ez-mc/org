@@ -5,6 +5,7 @@ import {
   mapBusinessToStructure,
   generateProcesses,
   processDocText,
+  stepsToMermaid,
   type OnboardingAnswers,
   type GeneratedProcess,
 } from '@platform/ai';
@@ -95,7 +96,7 @@ async function buildAndNotify(answers: OnboardingAnswers, ctx: AgentContext, roo
     const procFolder = await ensureFolder(built.companyFolderId, 'Бізнес-процеси');
     for (const pr of processes) {
       try {
-        await ensureDoc(procFolder, pr.name, processDocText(pr.name, pr.description, pr.steps));
+        await ensureDoc(procFolder, pr.name, processDocText(pr.name, pr.description, pr.steps, pr.mermaid));
       } catch (err) {
         // eslint-disable-next-line no-console
         console.warn('[agent] процес не створився:', pr.name, (err as Error).message);
@@ -150,7 +151,13 @@ async function buildAndNotify(answers: OnboardingAnswers, ctx: AgentContext, roo
     }
     for (const pr of processes) {
       await prisma.process.create({
-        data: { companyId: company.id, name: pr.name, description: pr.description, steps: pr.steps as object },
+        data: {
+          companyId: company.id,
+          name: pr.name,
+          description: pr.description,
+          steps: pr.steps as object,
+          diagram: (pr.mermaid && pr.mermaid.trim()) || stepsToMermaid(pr.steps),
+        },
       });
     }
   } catch (err) {

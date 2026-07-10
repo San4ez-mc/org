@@ -34,8 +34,28 @@ interface ProcStep {
   result: string;
 }
 
+/** Детермінований swimlane-Mermaid з лінійних кроків (fallback, якщо ШІ не дав діаграму). */
+export function stepsToMermaid(steps: ProcStep[]): string {
+  if (!steps.length) return 'flowchart TD\n  empty["Немає кроків"]';
+  const lanes = new Map<string, string[]>();
+  const lines: string[] = ['flowchart TD'];
+  const idOf = (i: number) => `s${i}`;
+  steps.forEach((s, i) => {
+    const lane = s.postTitle || 'Виконавець';
+    const label = `${s.action}`.replace(/["\n]/g, ' ').slice(0, 80);
+    if (!lanes.has(lane)) lanes.set(lane, []);
+    lanes.get(lane)!.push(`    ${idOf(i)}["${label}"]`);
+  });
+  let li = 0;
+  for (const [lane, nodes] of lanes) {
+    lines.push(`  subgraph L${li++}["${lane.replace(/"/g, '')}"]`, ...nodes, '  end');
+  }
+  for (let i = 1; i < steps.length; i++) lines.push(`  ${idOf(i - 1)} --> ${idOf(i)}`);
+  return lines.join('\n');
+}
+
 /** Текст Google-документа процесу: опис + кроки + Mermaid-схема потоку. */
-export function processDocText(name: string, description: string, steps: ProcStep[]): string {
+export function processDocText(name: string, description: string, steps: ProcStep[], mermaid?: string): string {
   const lines: string[] = [];
   lines.push(`Бізнес-процес: ${name}`, '');
   if (description) lines.push(description, '');
@@ -44,12 +64,6 @@ export function processDocText(name: string, description: string, steps: ProcSte
     lines.push(`${i + 1}. [${s.postTitle}] ${s.action}`);
     if (s.result) lines.push(`   → ${s.result}`);
   });
-  lines.push('', '— Схема (Mermaid) —', '```mermaid', 'flowchart LR');
-  steps.forEach((s, i) => {
-    const label = `${s.postTitle}: ${s.action}`.replace(/"/g, "'");
-    lines.push(`  s${i}["${label}"]`);
-    if (i > 0) lines.push(`  s${i - 1} --> s${i}`);
-  });
-  lines.push('```');
+  lines.push('', '— Swimlane-схема (Mermaid) —', '```mermaid', (mermaid && mermaid.trim()) || stepsToMermaid(steps), '```');
   return lines.join('\n');
 }

@@ -30,3 +30,10 @@ body {
 .paei-A { background: #ccd9f5; color: #1f3a7a; }
 .paei-E { background: #d1efd1; color: #1f5a26; }
 .paei-I { background: #fff0bf; color: #6b5310; }
+
+/* Скроли під темну тему */
+* { scrollbar-width: thin; scrollbar-color: hsl(var(--border)) transparent; }
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: hsl(var(--muted)); border-radius: 8px; border: 2px solid hsl(var(--background)); }
+::-webkit-scrollbar-thumb:hover { background: hsl(var(--muted-foreground)); }
