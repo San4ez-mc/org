@@ -118,6 +118,12 @@ async function buildAndNotify(answers: OnboardingAnswers, ctx: AgentContext, roo
         data: { companyId: company.id, type: 'DIVISION', name: div.name, boardNo: div.boardNo, ckp: div.ckp },
         select: { id: true },
       });
+      // Канонічні відділи відділення (з ЦКП)
+      for (const dept of div.departments) {
+        await prisma.orgUnit.create({
+          data: { companyId: company.id, parentId: divUnit.id, type: 'DEPARTMENT', name: dept.name, boardNo: dept.boardNo, ckp: dept.ckp },
+        });
+      }
       for (const p of spec.posts.filter((x) => x.boardNo === div.boardNo)) {
         await prisma.orgUnit.create({
           data: {
