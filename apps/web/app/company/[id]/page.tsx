@@ -60,6 +60,30 @@ export default async function CompanyPage({ params }: { params: { id: string } }
           );
         })}
       </div>
+
+      {company.processes?.length > 0 && (
+        <>
+          <h2 style={{ fontSize: 16, fontWeight: 600, margin: '28px 0 12px' }}>Бізнес-процеси</h2>
+          <div style={{ display: 'grid', gap: 12 }}>
+            {company.processes.map((pr) => (
+              <div key={pr.id} style={{ background: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: 'var(--radius)', padding: 14 }}>
+                <div style={{ fontWeight: 600, marginBottom: pr.description ? 4 : 8 }}>{pr.name}</div>
+                {pr.description && <div style={{ fontSize: 12, color: 'hsl(var(--muted-foreground))', marginBottom: 10 }}>{pr.description}</div>}
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
+                  {(pr.steps ?? []).map((s, i) => (
+                    <span key={i} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span style={{ fontSize: 12, background: 'hsl(var(--muted))', padding: '4px 8px', borderRadius: 6 }}>
+                        <b>{s.postTitle}</b>: {s.action}
+                      </span>
+                      {i < (pr.steps?.length ?? 0) - 1 && <span style={{ color: 'hsl(var(--muted-foreground))' }}>→</span>}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
     </div>
   );
 }

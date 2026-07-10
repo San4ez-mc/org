@@ -60,6 +60,45 @@ ${kb}
   return callClaudeJson<MappedStructure>(prompt, { system: SYSTEM, maxTokens: 1500, temperature: 0.3 });
 }
 
+export interface ProcessStep {
+  postTitle: string; // яка посада виконує крок
+  action: string; // що робить
+  result: string; // результат кроку (передається далі)
+}
+
+export interface GeneratedProcess {
+  name: string;
+  description: string;
+  steps: ProcessStep[];
+}
+
+/**
+ * Генерує ключові бізнес-процеси (потоки цінності) з кроками по реальних посадах.
+ * Частинка (лід/замовлення/учень/документ) тече зліва-направо через посади.
+ */
+export async function generateProcesses(
+  answers: OnboardingAnswers,
+  postTitles: string[],
+  knowledgeContext = '',
+): Promise<GeneratedProcess[]> {
+  const kb = knowledgeContext ? `\nМЕТОДОЛОГІЯ:\n${knowledgeContext}\n` : '';
+  const prompt = `Бізнес:
+${JSON.stringify(answers, null, 2)}
+
+Посади компанії: ${postTitles.join(', ')}
+${kb}
+Побудуй 2–4 КЛЮЧОВІ бізнес-процеси (потоки цінності) цього бізнесу — насамперед ті, що закривають болі. Кожен процес = послідовність кроків, де частинка (лід/замовлення/клієнт/документ) проходить через посади зліва-направо.
+Поверни ТІЛЬКИ JSON без тексту навколо:
+{ "processes": [ { "name": "Онбординг нового учня", "description": "стисло навіщо", "steps": [ { "postTitle": "Менеджер з продажу", "action": "що робить", "result": "що передає далі" } ] } ] }
+Правила: postTitle — тільки з наведених посад. 3–7 кроків на процес. Дії конкретні, дієслівні.`;
+  const out = await callClaudeJson<{ processes: GeneratedProcess[] }>(prompt, {
+    system: SYSTEM,
+    maxTokens: 2500,
+    temperature: 0.4,
+  });
+  return out.processes ?? [];
+}
+
 /** Пропонує коротку назву компанії з опису бізнесу (для назви папки). */
 export async function suggestCompanyName(answers: OnboardingAnswers): Promise<string> {
   if (typeof answers.business === 'string' && answers.business.length <= 40) return answers.business;

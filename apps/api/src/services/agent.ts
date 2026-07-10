@@ -1,6 +1,13 @@
 import { prisma } from '@platform/db';
-import { buildCompanyStructure, addCompanyPost, ensureDoc, appendSheetValues } from '@platform/drive';
-import { companyStarterNotes, mapBusinessToStructure, type OnboardingAnswers } from '@platform/ai';
+import { buildCompanyStructure, addCompanyPost, ensureDoc, ensureFolder, appendSheetValues } from '@platform/drive';
+import {
+  companyStarterNotes,
+  mapBusinessToStructure,
+  generateProcesses,
+  processDocText,
+  type OnboardingAnswers,
+  type GeneratedProcess,
+} from '@platform/ai';
 import { CANONICAL_DIVISIONS } from '@platform/org-template';
 import { knowledgeContextFor } from './knowledge';
 
@@ -81,8 +88,23 @@ async function buildAndNotify(answers: OnboardingAnswers, ctx: AgentContext, roo
       console.warn('[agent] посада не створилась:', p.title, (err as Error).message);
     }
   }
+
+  // Ключові бізнес-процеси (потоки цінності) → Google Docs
+  const processes: GeneratedProcess[] = await generateProcesses(answers, spec.posts.map((p) => p.title), kb).catch(() => []);
+  if (processes.length) {
+    const procFolder = await ensureFolder(built.companyFolderId, 'Бізнес-процеси');
+    for (const pr of processes) {
+      try {
+        await ensureDoc(procFolder, pr.name, processDocText(pr.name, pr.description, pr.steps));
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.warn('[agent] процес не створився:', pr.name, (err as Error).message);
+      }
+    }
+  }
+
   await appendSheetValues(built.journalSheetId, [
-    [nowStamp(), 'Створено компанію', name, `Структура + ${spec.posts.length} посад під бізнес`, ctx.telegramId ?? ''],
+    [nowStamp(), 'Створено компанію', name, `${spec.posts.length} посад + ${processes.length} процесів`, ctx.telegramId ?? ''],
   ]);
 
   // Персист у БД: компанія + відділення + тейлоровані посади
@@ -110,6 +132,11 @@ async function buildAndNotify(answers: OnboardingAnswers, ctx: AgentContext, roo
         });
       }
     }
+    for (const pr of processes) {
+      await prisma.process.create({
+        data: { companyId: company.id, name: pr.name, description: pr.description, steps: pr.steps as object },
+      });
+    }
   } catch (err) {
     // eslint-disable-next-line no-console
     console.warn('[agent] не вдалось зберегти структуру в БД:', (err as Error).message);
@@ -121,6 +148,8 @@ async function buildAndNotify(answers: OnboardingAnswers, ctx: AgentContext, roo
     ``,
     `Розклав твої посади по відділеннях:`,
     postsList,
+    ``,
+    processes.length ? `А ще побудував ${processes.length} ключових бізнес-процеси (папка «Бізнес-процеси»): ${processes.map((p) => p.name).join(', ')}.` : ``,
     ``,
     `Оригінали інструкцій — у Відділенні побудови, у папках посад — ярлики (зміниш оригінал — оновиться в усіх). Плюс Робочі папки з Архівом і дашборд (Оргсхема з PAEI-кольорами, Персонал, Журнал), а також документ «Рекомендації під твій бізнес».`,
     ``,

@@ -27,3 +27,29 @@ export function chunkText(text: string, maxLen = 1500, overlap = 200): string[] 
 export function toVectorLiteral(v: number[]): string {
   return '[' + v.join(',') + ']';
 }
+
+interface ProcStep {
+  postTitle: string;
+  action: string;
+  result: string;
+}
+
+/** Текст Google-документа процесу: опис + кроки + Mermaid-схема потоку. */
+export function processDocText(name: string, description: string, steps: ProcStep[]): string {
+  const lines: string[] = [];
+  lines.push(`Бізнес-процес: ${name}`, '');
+  if (description) lines.push(description, '');
+  lines.push('Кроки (потік частинки зліва-направо):', '');
+  steps.forEach((s, i) => {
+    lines.push(`${i + 1}. [${s.postTitle}] ${s.action}`);
+    if (s.result) lines.push(`   → ${s.result}`);
+  });
+  lines.push('', '— Схема (Mermaid) —', '```mermaid', 'flowchart LR');
+  steps.forEach((s, i) => {
+    const label = `${s.postTitle}: ${s.action}`.replace(/"/g, "'");
+    lines.push(`  s${i}["${label}"]`);
+    if (i > 0) lines.push(`  s${i - 1} --> s${i}`);
+  });
+  lines.push('```');
+  return lines.join('\n');
+}

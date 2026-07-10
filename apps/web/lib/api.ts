@@ -22,8 +22,22 @@ export interface OrgUnit {
   isVacant: boolean;
 }
 
+export interface ProcessStep {
+  postTitle: string;
+  action: string;
+  result: string;
+}
+
+export interface Process {
+  id: string;
+  name: string;
+  description: string | null;
+  steps: ProcessStep[] | null;
+}
+
 export interface CompanyDetail extends Company {
   orgUnits: OrgUnit[];
+  processes: Process[];
 }
 
 async function api<T>(path: string): Promise<T> {

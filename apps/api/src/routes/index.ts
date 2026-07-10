@@ -56,7 +56,10 @@ api.get('/companies/:id', async (req, res) => {
   try {
     const company = await prisma.company.findUnique({
       where: { id: req.params.id },
-      include: { orgUnits: { orderBy: [{ boardNo: 'asc' }, { orderNo: 'asc' }] } },
+      include: {
+        orgUnits: { orderBy: [{ boardNo: 'asc' }, { orderNo: 'asc' }] },
+        processes: { orderBy: { createdAt: 'asc' } },
+      },
     });
     if (!company) {
       res.status(404).json({ error: 'Компанію не знайдено' });
