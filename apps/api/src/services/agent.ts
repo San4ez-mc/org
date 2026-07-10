@@ -118,13 +118,23 @@ async function buildAndNotify(answers: OnboardingAnswers, ctx: AgentContext, roo
         data: { companyId: company.id, type: 'DIVISION', name: div.name, boardNo: div.boardNo, ckp: div.ckp },
         select: { id: true },
       });
-      // Канонічні відділи відділення (з ЦКП)
+      // Голова відділення
+      await prisma.orgUnit.create({
+        data: { companyId: company.id, parentId: divUnit.id, type: 'POST', name: 'Голова відділення', ckp: div.ckp, isVacant: true },
+      });
+      // Канонічні відділи (з ЦКП) + керівник кожного відділу
       for (const dept of div.departments) {
-        await prisma.orgUnit.create({
+        const deptUnit = await prisma.orgUnit.create({
           data: { companyId: company.id, parentId: divUnit.id, type: 'DEPARTMENT', name: dept.name, boardNo: dept.boardNo, ckp: dept.ckp },
+          select: { id: true },
+        });
+        await prisma.orgUnit.create({
+          data: { companyId: company.id, parentId: deptUnit.id, type: 'POST', name: 'Керівник відділу', ckp: dept.ckp, isVacant: true },
         });
       }
       for (const p of spec.posts.filter((x) => x.boardNo === div.boardNo)) {
+        // Тримач — лише реальне ім'я людини, ніколи не назва посади
+        const realHolder = p.holderName && p.holderName.trim() && p.holderName.trim() !== p.title.trim() ? p.holderName.trim() : null;
         await prisma.orgUnit.create({
           data: {
             companyId: company.id,
@@ -132,8 +142,8 @@ async function buildAndNotify(answers: OnboardingAnswers, ctx: AgentContext, roo
             type: 'POST',
             name: p.title,
             ckp: p.ckp,
-            holderName: p.holderName || null,
-            isVacant: !p.holderName,
+            holderName: realHolder,
+            isVacant: !realHolder,
           },
         });
       }
