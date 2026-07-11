@@ -51,7 +51,7 @@ api.get('/companies', async (_req, res) => {
   }
 });
 
-// Одна компанія + орг-одиниці (для сторінки компанії)
+// Одна компанія + орг-одиниці + процеси + працівники (для сторінки компанії)
 api.get('/companies/:id', async (req, res) => {
   try {
     const company = await prisma.company.findUnique({
@@ -59,6 +59,7 @@ api.get('/companies/:id', async (req, res) => {
       include: {
         orgUnits: { orderBy: [{ boardNo: 'asc' }, { orderNo: 'asc' }] },
         processes: { orderBy: { createdAt: 'asc' } },
+        members: { include: { posts: { include: { postUnit: { select: { id: true, name: true } } } } }, orderBy: { createdAt: 'asc' } },
       },
     });
     if (!company) {
@@ -66,6 +67,119 @@ api.get('/companies/:id', async (req, res) => {
       return;
     }
     res.json({ company });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+// ── Працівники (люди) ─────────────────────────────────────
+api.post('/companies/:id/members', async (req, res) => {
+  try {
+    const { firstName, lastName, telegramUserId, telegramUsername, role, postUnitIds } = req.body ?? {};
+    if (!firstName) return void res.status(400).json({ error: 'firstName обовʼязковий' });
+    const member = await prisma.member.create({
+      data: {
+        companyId: req.params.id,
+        firstName,
+        lastName: lastName || null,
+        telegramUserId: telegramUserId || null,
+        telegramUsername: telegramUsername || null,
+        role: role || 'EMPLOYEE',
+        posts: Array.isArray(postUnitIds) && postUnitIds.length ? { create: postUnitIds.map((pid: string) => ({ postUnitId: pid })) } : undefined,
+      },
+      include: { posts: true },
+    });
+    res.json({ member });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+api.patch('/members/:id', async (req, res) => {
+  try {
+    const { firstName, lastName, telegramUserId, telegramUsername, photoUrl, role } = req.body ?? {};
+    const member = await prisma.member.update({
+      where: { id: req.params.id },
+      data: {
+        ...(firstName !== undefined && { firstName }),
+        ...(lastName !== undefined && { lastName }),
+        ...(telegramUserId !== undefined && { telegramUserId }),
+        ...(telegramUsername !== undefined && { telegramUsername }),
+        ...(photoUrl !== undefined && { photoUrl }),
+        ...(role !== undefined && { role }),
+      },
+    });
+    res.json({ member });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+api.delete('/members/:id', async (req, res) => {
+  try {
+    await prisma.member.delete({ where: { id: req.params.id } });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+// Призначити / зняти з посади
+api.post('/members/:id/posts', async (req, res) => {
+  try {
+    const { postUnitId } = req.body ?? {};
+    if (!postUnitId) return void res.status(400).json({ error: 'postUnitId обовʼязковий' });
+    await prisma.memberPost.upsert({
+      where: { memberId_postUnitId: { memberId: req.params.id, postUnitId } },
+      create: { memberId: req.params.id, postUnitId },
+      update: {},
+    });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+api.delete('/members/:id/posts/:postUnitId', async (req, res) => {
+  try {
+    await prisma.memberPost.deleteMany({ where: { memberId: req.params.id, postUnitId: req.params.postUnitId } });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+// ── Редагування орг-одиниць ───────────────────────────────
+api.patch('/org-units/:id', async (req, res) => {
+  try {
+    const { name, ckp } = req.body ?? {};
+    const unit = await prisma.orgUnit.update({
+      where: { id: req.params.id },
+      data: { ...(name !== undefined && { name }), ...(ckp !== undefined && { ckp }) },
+    });
+    res.json({ unit });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+api.post('/companies/:id/org-units', async (req, res) => {
+  try {
+    const { parentId, name, ckp, type } = req.body ?? {};
+    if (!parentId || !name) return void res.status(400).json({ error: 'parentId і name обовʼязкові' });
+    const unit = await prisma.orgUnit.create({
+      data: { companyId: req.params.id, parentId, name, ckp: ckp || null, type: type || 'POST' },
+    });
+    res.json({ unit });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+api.delete('/org-units/:id', async (req, res) => {
+  try {
+    await prisma.orgUnit.delete({ where: { id: req.params.id } });
+    res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: String(err) });
   }

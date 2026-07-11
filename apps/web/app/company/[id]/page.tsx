@@ -1,10 +1,8 @@
 import { getCompany, type OrgUnit } from '@/lib/api';
-import CompanyTabs from '@/components/CompanyTabs';
+import CompanyHeader from '@/components/CompanyTabs';
+import PeoplePanel from '@/components/PeoplePanel';
 
 export const dynamic = 'force-dynamic';
-
-const th = { textAlign: 'left', fontSize: 12, fontWeight: 500, color: 'hsl(var(--muted-foreground))', padding: '8px 12px', borderBottom: '1px solid hsl(var(--border))' } as const;
-const td = { fontSize: 13, padding: '10px 12px', borderBottom: '1px solid hsl(var(--border))' } as const;
 
 export default async function CompanyOverview({ params }: { params: { id: string } }) {
   let company;
@@ -14,14 +12,26 @@ export default async function CompanyOverview({ params }: { params: { id: string
     return <p style={{ color: 'hsl(var(--muted-foreground))' }}>Компанію не знайдено або API недоступний.</p>;
   }
 
-  const divisions = company.orgUnits.filter((u) => u.type === 'DIVISION');
-  const divName = (id: string | null) => divisions.find((d) => d.id === id)?.name ?? '—';
-  const posts = company.orgUnits.filter((u) => u.type === 'POST');
-  const filled = posts.filter((p) => !p.isVacant && p.holderName);
+  const units = company.orgUnits;
+  const divisions = units.filter((u) => u.type === 'DIVISION');
+  const nameOf = (id: string | null) => units.find((u) => u.id === id)?.name ?? '';
+  const divisionFor = (u: OrgUnit): string => {
+    let cur: OrgUnit | undefined = u;
+    // піднімаємось до відділення
+    while (cur && cur.type !== 'DIVISION') cur = units.find((x) => x.id === cur!.parentId);
+    return cur?.name ?? '';
+  };
+
+  // Посади для призначення (без керівницьких заглушок дублюємо як опції)
+  const postOptions = units
+    .filter((u) => u.type === 'POST')
+    .map((p) => ({ id: p.id, name: p.name, division: divisionFor(p) }));
+
+  const posts = units.filter((u) => u.type === 'POST');
 
   return (
     <div>
-      <CompanyTabs company={company} active="" />
+      <CompanyHeader company={company} />
 
       {company.driveRootFolderId && (
         <a href={`https://drive.google.com/drive/folders/${company.driveRootFolderId}`} target="_blank" style={{ fontSize: 13, color: 'hsl(var(--primary))' }}>
@@ -29,43 +39,14 @@ export default async function CompanyOverview({ params }: { params: { id: string
         </a>
       )}
 
-      <div style={{ display: 'flex', gap: 12, margin: '16px 0 24px' }}>
+      <div style={{ display: 'flex', gap: 12, margin: '16px 0 24px', flexWrap: 'wrap' }}>
         <Stat label="Відділень" value={divisions.length} />
         <Stat label="Посад" value={posts.length} />
-        <Stat label="Працівників" value={filled.length} />
+        <Stat label="Працівників" value={company.members.length} />
         <Stat label="Процесів" value={company.processes?.length ?? 0} />
       </div>
 
-      <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 10 }}>Працівники та посади</h2>
-      <div style={{ background: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: 'var(--radius)', overflow: 'hidden' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-          <thead>
-            <tr>
-              <th style={th}>Посада</th>
-              <th style={th}>Відділення</th>
-              <th style={th}>Працівник</th>
-              <th style={th}>Статус</th>
-            </tr>
-          </thead>
-          <tbody>
-            {posts.map((p: OrgUnit) => (
-              <tr key={p.id}>
-                <td style={{ ...td, fontWeight: 500 }}>{p.name}</td>
-                <td style={{ ...td, color: 'hsl(var(--muted-foreground))' }}>{divName(p.parentId)}</td>
-                <td style={td}>{p.isVacant || !p.holderName ? '—' : p.holderName}</td>
-                <td style={td}>
-                  <span style={{ fontSize: 12, padding: '2px 8px', borderRadius: 6, background: p.isVacant || !p.holderName ? 'hsl(var(--muted))' : '#1f5a2633', color: p.isVacant || !p.holderName ? 'hsl(var(--muted-foreground))' : '#6bbf72' }}>
-                    {p.isVacant || !p.holderName ? 'вакансія' : 'зайнято'}
-                  </span>
-                </td>
-              </tr>
-            ))}
-            {!posts.length && (
-              <tr><td style={{ ...td, color: 'hsl(var(--muted-foreground))' }} colSpan={4}>Посад ще немає.</td></tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+      <PeoplePanel companyId={company.id} members={company.members} posts={postOptions} />
     </div>
   );
 }

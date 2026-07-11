@@ -36,9 +36,26 @@ export interface Process {
   diagram: string | null;
 }
 
+export interface MemberPost {
+  postUnitId: string;
+  postUnit: { id: string; name: string };
+}
+
+export interface Member {
+  id: string;
+  firstName: string;
+  lastName: string | null;
+  telegramUserId: string | null;
+  telegramUsername: string | null;
+  photoUrl: string | null;
+  role: string;
+  posts: MemberPost[];
+}
+
 export interface CompanyDetail extends Company {
   orgUnits: OrgUnit[];
   processes: Process[];
+  members: Member[];
 }
 
 async function api<T>(path: string): Promise<T> {

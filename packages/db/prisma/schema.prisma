@@ -92,7 +92,7 @@ model OrgUnit {
   reportsFrom     OrgUnit[] @relation("PostReports")
   isVacant        Boolean   @default(false)
 
-  members      Member[]
+  memberPosts  MemberPost[]
   instructions Instruction[]
   ownedProcess Process[]     @relation("ProcessOwner")
   driveFolder  DriveFolder?
@@ -105,24 +105,40 @@ model OrgUnit {
   @@index([companyId, type])
 }
 
-// ── Учасник (людина в компанії, привʼязана до Telegram) ────
+// ── Працівник (людина; може обіймати кілька посад) ─────────
 model Member {
-  id             String     @id @default(uuid())
-  companyId      String
-  company        Company    @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  telegramUserId String?
-  fullName       String
-  role           MemberRole @default(EMPLOYEE)
-  postUnitId     String?
-  postUnit       OrgUnit?   @relation(fields: [postUnitId], references: [id])
+  id               String     @id @default(uuid())
+  companyId        String
+  company          Company    @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  firstName        String
+  lastName         String?
+  telegramUserId   String?
+  telegramUsername String?
+  photoUrl         String?
+  role             MemberRole @default(EMPLOYEE)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  posts    MemberPost[]
   botLinks BotLink[]
 
   @@unique([companyId, telegramUserId])
   @@index([companyId])
+}
+
+// ── Призначення працівника на посаду (багато-до-багатьох) ──
+model MemberPost {
+  id         String  @id @default(uuid())
+  memberId   String
+  member     Member  @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  postUnitId String
+  postUnit   OrgUnit @relation(fields: [postUnitId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@unique([memberId, postUnitId])
+  @@index([postUnitId])
 }
 
 // ── Deep-link коди для спільного бота платформи ────────────
