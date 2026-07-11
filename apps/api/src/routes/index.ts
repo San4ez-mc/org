@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { randomBytes } from 'crypto';
 import { prisma } from '@platform/db';
 import { findFolderByName, listFolderTree } from '@platform/drive';
 import { stepsToMermaid } from '@platform/ai';
@@ -162,6 +163,73 @@ api.delete('/members/:id/posts/:postUnitId', async (req, res) => {
   try {
     await prisma.memberPost.deleteMany({ where: { memberId: req.params.id, postUnitId: req.params.postUnitId } });
     res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+// ── Портал працівника (персональна зведена інформація) ─────
+type MemberWithPosts = { id: string; firstName: string; lastName: string | null; role: string; companyId: string; posts: { postUnitId: string }[] };
+
+async function buildMemberSummary(member: MemberWithPosts) {
+  const postUnitIds = member.posts.map((p) => p.postUnitId);
+  const units = await prisma.orgUnit.findMany({
+    where: { id: { in: postUnitIds } },
+    include: { parent: { include: { parent: { include: { parent: true } } } } },
+  });
+  const postNames = units.map((u) => u.name);
+  const [company, statistics] = await Promise.all([
+    prisma.company.findUnique({ where: { id: member.companyId }, include: { processes: { orderBy: { createdAt: 'asc' } } } }),
+    prisma.statistic.findMany({ where: { orgUnitId: { in: postUnitIds } }, include: { orgUnit: { select: { id: true, name: true, type: true } } } }),
+  ]);
+  const processes = (company?.processes ?? []).filter(
+    (pr) => Array.isArray(pr.steps) && (pr.steps as { postTitle?: string }[]).some((s) => s?.postTitle && postNames.includes(s.postTitle)),
+  );
+  const ancestors = (u: { parent?: { name: string; parent?: { name: string; parent?: { name: string } | null } | null } | null }) => {
+    const names: string[] = [];
+    let p = u.parent;
+    while (p) { names.unshift(p.name); p = p.parent ?? null; }
+    return names;
+  };
+  return {
+    member: { id: member.id, firstName: member.firstName, lastName: member.lastName, role: member.role },
+    company: company ? { id: company.id, name: company.name } : null,
+    posts: units.map((u) => ({ id: u.id, name: u.name, ckp: u.ckp, path: ancestors(u) })),
+    processes: processes.map((pr) => ({ id: pr.id, name: pr.name, description: pr.description, steps: pr.steps })),
+    statistics,
+  };
+}
+
+// Згенерувати/повернути особисте посилання входу для працівника
+api.post('/members/:id/access-token', async (req, res) => {
+  try {
+    const m = await prisma.member.findUnique({ where: { id: req.params.id } });
+    if (!m) return res.status(404).json({ error: 'not found' });
+    const token = m.accessToken || randomBytes(24).toString('hex');
+    if (!m.accessToken) await prisma.member.update({ where: { id: m.id }, data: { accessToken: token } });
+    res.json({ token });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+// Зведення для працівника за особистим токеном (портал)
+api.get('/me/:token', async (req, res) => {
+  try {
+    const member = await prisma.member.findUnique({ where: { accessToken: req.params.token }, include: { posts: true } });
+    if (!member) return res.status(404).json({ error: 'not found' });
+    res.json({ summary: await buildMemberSummary(member) });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+// Зведення для працівника за Telegram id (для бота-самообслуговування)
+api.get('/members/by-telegram/:tgId', async (req, res) => {
+  try {
+    const member = await prisma.member.findFirst({ where: { telegramUserId: req.params.tgId }, include: { posts: true } });
+    if (!member) return res.status(404).json({ error: 'not found' });
+    res.json({ summary: await buildMemberSummary(member) });
   } catch (err) {
     res.status(500).json({ error: String(err) });
   }

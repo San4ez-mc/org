@@ -7,7 +7,7 @@ import type { Company } from '@/lib/api';
 
 export default function AppShell({ companies, children }: { companies: Company[]; children: ReactNode }) {
   const path = usePathname() || '/';
-  if (path.startsWith('/login')) return <>{children}</>;
+  if (path.startsWith('/login') || path.startsWith('/me')) return <>{children}</>;
 
   return (
     <>

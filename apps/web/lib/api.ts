@@ -116,6 +116,23 @@ export async function getStatistics(companyId: string): Promise<Statistic[]> {
   return statistics;
 }
 
+export interface MeSummary {
+  member: { id: string; firstName: string; lastName: string | null; role: string };
+  company: { id: string; name: string } | null;
+  posts: { id: string; name: string; ckp: string | null; path: string[] }[];
+  processes: { id: string; name: string; description: string | null; steps: ProcessStep[] | null }[];
+  statistics: Statistic[];
+}
+
+export async function getMe(token: string): Promise<MeSummary | null> {
+  try {
+    const { summary } = await api<{ summary: MeSummary }>(`/me/${token}`);
+    return summary;
+  } catch {
+    return null;
+  }
+}
+
 export interface Change {
   id: string;
   entity: string;

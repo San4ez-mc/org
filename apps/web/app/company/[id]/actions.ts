@@ -30,6 +30,11 @@ export async function deleteMember(companyId: string, memberId: string) {
   revalidatePath(`/company/${companyId}`);
 }
 
+export async function generateAccessToken(memberId: string): Promise<string> {
+  const { token } = await call(`/members/${memberId}/access-token`, 'POST');
+  return token as string;
+}
+
 export async function assignPost(companyId: string, memberId: string, postUnitId: string) {
   await call(`/members/${memberId}/posts`, 'POST', { postUnitId });
   revalidatePath(`/company/${companyId}`);

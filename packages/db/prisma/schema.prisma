@@ -140,6 +140,7 @@ model Member {
   email            String?
   birthDate        DateTime?
   role             MemberRole @default(EMPLOYEE)
+  accessToken      String?    @unique // особисте посилання входу до порталу працівника
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
