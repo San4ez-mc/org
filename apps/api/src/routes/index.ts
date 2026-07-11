@@ -12,6 +12,15 @@ export const api = Router();
 
 api.use(requireApiSecret);
 
+/** Записати зміну в журнал (не блокує основну дію). */
+async function logChange(companyId: string, entity: string, action: string, summary: string, author?: string) {
+  try {
+    await prisma.changeLog.create({ data: { companyId, entity, action, summary, author: author || 'пульт' } });
+  } catch {
+    /* ignore */
+  }
+}
+
 const notImplemented = (name: string) => (_: unknown, res: any) =>
   res.status(501).json({ error: `${name} ще не реалізовано (заглушка I1)` });
 
@@ -89,6 +98,7 @@ api.post('/companies/:id/members', async (req, res) => {
       },
       include: { posts: true },
     });
+    await logChange(req.params.id, 'structure', 'create', `Додано працівника: ${firstName} ${lastName || ''}`.trim(), req.body?.author);
     res.json({ member });
   } catch (err) {
     res.status(500).json({ error: String(err) });
@@ -117,7 +127,9 @@ api.patch('/members/:id', async (req, res) => {
 
 api.delete('/members/:id', async (req, res) => {
   try {
+    const m = await prisma.member.findUnique({ where: { id: req.params.id }, select: { companyId: true, firstName: true, lastName: true } });
     await prisma.member.delete({ where: { id: req.params.id } });
+    if (m) await logChange(m.companyId, 'structure', 'delete', `Видалено працівника: ${m.firstName} ${m.lastName || ''}`.trim(), req.body?.author);
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: String(err) });
@@ -157,6 +169,7 @@ api.patch('/org-units/:id', async (req, res) => {
       where: { id: req.params.id },
       data: { ...(name !== undefined && { name }), ...(ckp !== undefined && { ckp }) },
     });
+    await logChange(unit.companyId, 'structure', 'update', `Оновлено «${unit.name}»${ckp !== undefined ? ' (ЦКП)' : ''}`, req.body?.author);
     res.json({ unit });
   } catch (err) {
     res.status(500).json({ error: String(err) });
@@ -170,6 +183,7 @@ api.post('/companies/:id/org-units', async (req, res) => {
     const unit = await prisma.orgUnit.create({
       data: { companyId: req.params.id, parentId, name, ckp: ckp || null, type: type || 'POST' },
     });
+    await logChange(req.params.id, 'structure', 'create', `Додано ${type === 'DEPARTMENT' ? 'відділ' : 'посаду'}: ${name}`, req.body?.author);
     res.json({ unit });
   } catch (err) {
     res.status(500).json({ error: String(err) });
@@ -178,8 +192,30 @@ api.post('/companies/:id/org-units', async (req, res) => {
 
 api.delete('/org-units/:id', async (req, res) => {
   try {
+    const unit = await prisma.orgUnit.findUnique({ where: { id: req.params.id }, select: { companyId: true, name: true } });
     await prisma.orgUnit.delete({ where: { id: req.params.id } });
+    if (unit) await logChange(unit.companyId, 'structure', 'delete', `Видалено: ${unit.name}`, req.body?.author);
     res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+// ── Журнал змін + технічні логи ───────────────────────────
+api.get('/companies/:id/changes', async (req, res) => {
+  try {
+    const changes = await prisma.changeLog.findMany({ where: { companyId: req.params.id }, orderBy: { createdAt: 'desc' }, take: 200 });
+    res.json({ changes });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+api.get('/logs', async (req, res) => {
+  try {
+    const level = typeof req.query.level === 'string' ? req.query.level : undefined;
+    const logs = await prisma.eventLog.findMany({ where: level ? { level } : undefined, orderBy: { createdAt: 'desc' }, take: 300 });
+    res.json({ logs });
   } catch (err) {
     res.status(500).json({ error: String(err) });
   }

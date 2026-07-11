@@ -69,6 +69,7 @@ model Company {
   driveFolders DriveFolder[]
   proposals    Proposal[]
   embeddings   InstructionEmbedding[]
+  changes      ChangeLog[]
 }
 
 // ── Оргсхема (джерело зв'язків; Google Sheet — дзеркало) ───
@@ -250,6 +251,36 @@ model DriveFolder {
   createdAt DateTime @default(now())
 
   @@index([companyId])
+}
+
+// ── Журнал змін (структура / процеси / інструкції) ────────
+model ChangeLog {
+  id         String   @id @default(uuid())
+  companyId  String
+  company    Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  entity     String // 'structure' | 'process' | 'instruction'
+  action     String // create | update | delete | assign | unassign
+  summary    String
+  author     String? // хто зробив зміну (пізніше — memberId/роль)
+  approvedBy String?
+  approved   Boolean  @default(true) // поки авто; система затверджень — пізніше
+  createdAt  DateTime @default(now())
+
+  @@index([companyId])
+}
+
+// ── Технічні події/логи (боти, api, worker) ───────────────
+model EventLog {
+  id        String   @id @default(uuid())
+  level     String // info | warn | error
+  source    String // bot | api | worker
+  message   String
+  companyId String?
+  meta      Json?
+  createdAt DateTime @default(now())
+
+  @@index([level])
+  @@index([createdAt])
 }
 
 // ── База знань по орг.структурі (глобальна, RAG) ──────────

@@ -76,3 +76,31 @@ export async function getCompany(id: string): Promise<CompanyDetail> {
   const { company } = await api<{ company: CompanyDetail }>(`/companies/${id}`);
   return company;
 }
+
+export interface Change {
+  id: string;
+  entity: string;
+  action: string;
+  summary: string;
+  author: string | null;
+  approved: boolean;
+  createdAt: string;
+}
+
+export async function getChanges(companyId: string): Promise<Change[]> {
+  const { changes } = await api<{ changes: Change[] }>(`/companies/${companyId}/changes`);
+  return changes;
+}
+
+export interface EventLog {
+  id: string;
+  level: string;
+  source: string;
+  message: string;
+  createdAt: string;
+}
+
+export async function getLogs(): Promise<EventLog[]> {
+  const { logs } = await api<{ logs: EventLog[] }>(`/logs`);
+  return logs;
+}
