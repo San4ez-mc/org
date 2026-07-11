@@ -1,5 +1,5 @@
 import { getCompany } from '@/lib/api';
-import CompanyTabs from '@/components/CompanyTabs';
+import CompanyHeader from '@/components/CompanyTabs';
 import OrgBoard from '@/components/OrgBoard';
 
 export const dynamic = 'force-dynamic';
@@ -14,8 +14,8 @@ export default async function StructurePage({ params }: { params: { id: string }
 
   return (
     <div>
-      <CompanyTabs company={company} active="/structure" />
-      <OrgBoard units={company.orgUnits} />
+      <CompanyHeader company={company} />
+      <OrgBoard units={company.orgUnits} members={company.members} companyId={company.id} />
     </div>
   );
 }
