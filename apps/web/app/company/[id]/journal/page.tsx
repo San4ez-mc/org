@@ -1,4 +1,4 @@
-import { getCompany, getChanges } from '@/lib/api';
+import { getCompany, getChanges, type Change } from '@/lib/api';
 import CompanyHeader from '@/components/CompanyTabs';
 
 export const dynamic = 'force-dynamic';
@@ -14,7 +14,7 @@ export default async function JournalPage({ params }: { params: { id: string } }
     return <p style={{ color: 'hsl(var(--muted-foreground))' }}>Не вдалось завантажити журнал.</p>;
   }
 
-  const cell = (c: (typeof changes)[number], entity: string) => (c.entity === entity ? c.summary : '');
+  const cell = (c: Change, entity: string) => (c.entity === entity ? c.summary : '');
 
   return (
     <div>

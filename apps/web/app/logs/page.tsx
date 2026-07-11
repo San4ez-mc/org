@@ -4,7 +4,7 @@ export const dynamic = 'force-dynamic';
 
 const th = { textAlign: 'left', fontSize: 12, fontWeight: 500, color: 'hsl(var(--muted-foreground))', padding: '8px 12px', borderBottom: '1px solid hsl(var(--border))' } as const;
 const td = { fontSize: 13, padding: '9px 12px', borderBottom: '1px solid hsl(var(--border))' } as const;
-const levelColor: Record<string, string> = { error: '#e07a7a', warn: '#d6b84f', info: 'hsl(var(--muted-foreground))' };
+const levelColor: { [k: string]: string } = { error: '#e07a7a', warn: '#d6b84f', info: 'hsl(var(--muted-foreground))' };
 
 export default async function LogsPage() {
   let logs;
