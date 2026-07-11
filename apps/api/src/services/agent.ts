@@ -4,6 +4,7 @@ import {
   companyStarterNotes,
   mapBusinessToStructure,
   generateProcesses,
+  generateProcessMermaid,
   processDocText,
   stepsToMermaid,
   type OnboardingAnswers,
@@ -91,7 +92,12 @@ async function buildAndNotify(answers: OnboardingAnswers, ctx: AgentContext, roo
   }
 
   // Ключові бізнес-процеси (потоки цінності) → Google Docs
-  const processes: GeneratedProcess[] = await generateProcesses(answers, spec.posts.map((p) => p.title), kb).catch(() => []);
+  const postTitles = spec.posts.map((p) => p.title);
+  const processes: GeneratedProcess[] = await generateProcesses(answers, postTitles, kb).catch(() => []);
+  // Swimlane-діаграма кожного процесу (окремий виклик, з fallback)
+  for (const pr of processes) {
+    pr.mermaid = (await generateProcessMermaid(pr, postTitles).catch(() => '')) || stepsToMermaid(pr.steps);
+  }
   if (processes.length) {
     const procFolder = await ensureFolder(built.companyFolderId, 'Бізнес-процеси');
     for (const pr of processes) {

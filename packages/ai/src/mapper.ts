@@ -89,30 +89,39 @@ ${JSON.stringify(answers, null, 2)}
 Посади компанії: ${postTitles.join(', ')}
 ${kb}
 Побудуй 2–4 КЛЮЧОВІ бізнес-процеси (потоки цінності) цього бізнесу — насамперед ті, що закривають болі. Кожен процес = послідовність кроків, де частинка (лід/замовлення/клієнт/документ) проходить через посади зліва-направо.
-Для КОЖНОГО процесу додай поле "mermaid" — swimlane-діаграму у синтаксисі Mermaid flowchart, де лейни = відповідальні (subgraph на кожного, включно з зовнішніми: Клієнт, Система тощо), з рішеннями і гілками.
-
-Приклад mermaid (дотримуйся синтаксису точно):
-flowchart TD
-  subgraph L1["Менеджер з продажу"]
-    a1["Отримує заявку"]
-    a2{"Клієнт підходить?"}
-  end
-  subgraph L2["Клієнт"]
-    b1["Заповнює форму"]
-  end
-  b1 --> a1 --> a2
-  a2 -->|так| a3["Призначає зустріч"]
-  a2 -->|ні| a4["Ввічлива відмова"]
-
 Поверни ТІЛЬКИ JSON без тексту навколо:
-{ "processes": [ { "name": "Онбординг нового учня", "description": "стисло навіщо", "steps": [ { "postTitle": "Менеджер з продажу", "action": "що робить", "result": "що передає далі" } ], "mermaid": "flowchart TD\\n  subgraph ..." } ] }
-Правила: postTitle — тільки з наведених посад. 4–8 кроків. У mermaid: id вузлів латиницею (a1,b2…), тексти в лапках "…", без спецсимволів у лапках крім пробілів/крапок; лейни-subgraph на кожного відповідального. Дії конкретні, дієслівні.`;
+{ "processes": [ { "name": "Онбординг нового учня", "description": "стисло навіщо", "steps": [ { "postTitle": "Менеджер з продажу", "action": "що робить", "result": "що передає далі" } ] } ] }
+Правила: postTitle — тільки з наведених посад. 4–8 кроків. Дії конкретні, дієслівні.`;
   const out = await callClaudeJson<{ processes: GeneratedProcess[] }>(prompt, {
     system: SYSTEM,
     maxTokens: 2500,
     temperature: 0.4,
   });
   return out.processes ?? [];
+}
+
+/**
+ * Генерує Mermaid swimlane для процесу окремим викликом — ПРОСТИМ ТЕКСТОМ (не JSON),
+ * щоб переноси/лапки в діаграмі не ламали парсинг. З лейнами по відповідальних і рішеннями.
+ */
+export async function generateProcessMermaid(process: GeneratedProcess, postTitles: string[]): Promise<string> {
+  const prompt = `Побудуй Mermaid swimlane-діаграму для бізнес-процесу.
+Процес: ${process.name}
+Опис: ${process.description}
+Кроки: ${process.steps.map((s, i) => `${i + 1}) [${s.postTitle}] ${s.action} → ${s.result}`).join('; ')}
+Доступні відповідальні (лейни): ${[...new Set([...postTitles, 'Клієнт', 'Система'])].join(', ')}
+
+Правила синтаксису (дотримуйся ТОЧНО):
+- Починай з "flowchart TD".
+- На кожного відповідального — subgraph: subgraph L1["Назва відповідального"] ... end
+- Вузли-дії: a1["текст"]; рішення: d1{"Питання?"}; id вузлів латиницею.
+- Тексти в подвійних лапках, без переносів рядків і без лапок всередині.
+- Звʼязки: a1 --> a2; гілки: d1 -->|так| a3 та d1 -->|ні| a4.
+
+Виведи ЛИШЕ код діаграми, без пояснень і без блоку \`\`\`.`;
+  const raw = await callClaude(prompt, { system: SYSTEM, maxTokens: 1500, temperature: 0.3 });
+  const cleaned = raw.replace(/```mermaid/gi, '').replace(/```/g, '').trim();
+  return cleaned.startsWith('flowchart') || cleaned.startsWith('graph') ? cleaned : '';
 }
 
 /** Пропонує коротку назву компанії з опису бізнесу (для назви папки). */

@@ -1,6 +1,6 @@
 import 'dotenv/config';
 import { prisma } from '@platform/db';
-import { generateProcesses, processDocText, stepsToMermaid } from '@platform/ai';
+import { generateProcesses, generateProcessMermaid, processDocText, stepsToMermaid } from '@platform/ai';
 import { ensureFolder, ensureDoc } from '@platform/drive';
 
 /**
@@ -23,7 +23,8 @@ async function main() {
 
   const procFolder = company.driveRootFolderId ? await ensureFolder(company.driveRootFolderId, 'Бізнес-процеси') : null;
   for (const pr of procs) {
-    const diagram = (pr.mermaid && pr.mermaid.trim()) || stepsToMermaid(pr.steps);
+    pr.mermaid = (await generateProcessMermaid(pr, postTitles).catch(() => '')) || stepsToMermaid(pr.steps);
+    const diagram = pr.mermaid;
     await prisma.process.create({ data: { companyId, name: pr.name, description: pr.description, steps: pr.steps as object, diagram } });
     if (procFolder) await ensureDoc(procFolder, pr.name, processDocText(pr.name, pr.description, pr.steps, pr.mermaid));
     console.log('  ✓', pr.name, `(${pr.steps.length} кроків)`);
