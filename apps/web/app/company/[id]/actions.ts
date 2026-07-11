@@ -75,3 +75,24 @@ export async function deleteProcess(companyId: string, processId: string) {
   await call(`/processes/${processId}`, 'DELETE', { author: 'пульт' });
   revalidatePath(`/company/${companyId}/processes`);
 }
+
+// ── Статистики по ЦКП ──────────────────────────────────────
+export async function addStatistic(companyId: string, data: { orgUnitId: string; name: string; unit?: string; higherIsBetter?: boolean }) {
+  await call(`/companies/${companyId}/statistics`, 'POST', { ...data, author: 'пульт' });
+  revalidatePath(`/company/${companyId}/stats`);
+}
+
+export async function addPoint(companyId: string, statisticId: string, value: number, date?: string) {
+  await call(`/statistics/${statisticId}/points`, 'POST', { value, date });
+  revalidatePath(`/company/${companyId}/stats`);
+}
+
+export async function updateStatistic(companyId: string, statisticId: string, data: { name?: string; unit?: string; higherIsBetter?: boolean; points?: { date: string; value: number }[] }) {
+  await call(`/statistics/${statisticId}`, 'PATCH', data);
+  revalidatePath(`/company/${companyId}/stats`);
+}
+
+export async function deleteStatistic(companyId: string, statisticId: string) {
+  await call(`/statistics/${statisticId}`, 'DELETE', { author: 'пульт' });
+  revalidatePath(`/company/${companyId}/stats`);
+}

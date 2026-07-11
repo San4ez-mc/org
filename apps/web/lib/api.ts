@@ -100,6 +100,22 @@ export async function getCompany(id: string): Promise<CompanyDetail> {
   return company;
 }
 
+export interface StatPoint { date: string; value: number }
+export interface Statistic {
+  id: string;
+  orgUnitId: string;
+  name: string;
+  unit: string | null;
+  higherIsBetter: boolean;
+  points: StatPoint[];
+  orgUnit: { id: string; name: string; type: string };
+}
+
+export async function getStatistics(companyId: string): Promise<Statistic[]> {
+  const { statistics } = await api<{ statistics: Statistic[] }>(`/companies/${companyId}/statistics`);
+  return statistics;
+}
+
 export interface Change {
   id: string;
   entity: string;

@@ -267,6 +267,86 @@ api.delete('/processes/:id', async (req, res) => {
   }
 });
 
+// ── Статистики по ЦКП ─────────────────────────────────────
+api.get('/companies/:id/statistics', async (req, res) => {
+  try {
+    const statistics = await prisma.statistic.findMany({
+      where: { companyId: req.params.id },
+      include: { orgUnit: { select: { id: true, name: true, type: true } } },
+      orderBy: { createdAt: 'asc' },
+    });
+    res.json({ statistics });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+api.post('/companies/:id/statistics', async (req, res) => {
+  try {
+    const { orgUnitId, name, unit, higherIsBetter } = req.body ?? {};
+    if (!orgUnitId || !name) return res.status(400).json({ error: 'orgUnitId і name обовʼязкові' });
+    const statistic = await prisma.statistic.create({
+      data: { companyId: req.params.id, orgUnitId, name, unit: unit || null, higherIsBetter: higherIsBetter !== false, points: [] },
+      include: { orgUnit: { select: { id: true, name: true, type: true } } },
+    });
+    await logChange(req.params.id, 'structure', 'create', `Додано статистику «${name}»`, req.body?.author);
+    res.json({ statistic });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+api.patch('/statistics/:id', async (req, res) => {
+  try {
+    const { name, unit, higherIsBetter, points } = req.body ?? {};
+    const data: Record<string, unknown> = {};
+    if (name !== undefined) data.name = name;
+    if (unit !== undefined) data.unit = unit || null;
+    if (higherIsBetter !== undefined) data.higherIsBetter = higherIsBetter;
+    if (Array.isArray(points)) data.points = points;
+    const statistic = await prisma.statistic.update({
+      where: { id: req.params.id }, data,
+      include: { orgUnit: { select: { id: true, name: true, type: true } } },
+    });
+    res.json({ statistic });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+// Додати точку до ряду (для бота/швидкого вводу)
+api.post('/statistics/:id/points', async (req, res) => {
+  try {
+    const { date, value } = req.body ?? {};
+    if (value === undefined || value === null || Number.isNaN(Number(value))) return res.status(400).json({ error: 'value має бути числом' });
+    const cur = await prisma.statistic.findUnique({ where: { id: req.params.id } });
+    if (!cur) return res.status(404).json({ error: 'not found' });
+    const d = (date && String(date)) || new Date().toISOString().slice(0, 10);
+    const points = Array.isArray(cur.points) ? (cur.points as { date: string; value: number }[]) : [];
+    const filtered = points.filter((p) => p.date !== d); // одна точка на дату
+    filtered.push({ date: d, value: Number(value) });
+    filtered.sort((a, b) => a.date.localeCompare(b.date));
+    const statistic = await prisma.statistic.update({
+      where: { id: req.params.id }, data: { points: filtered },
+      include: { orgUnit: { select: { id: true, name: true, type: true } } },
+    });
+    res.json({ statistic });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+api.delete('/statistics/:id', async (req, res) => {
+  try {
+    const s = await prisma.statistic.findUnique({ where: { id: req.params.id }, select: { companyId: true, name: true } });
+    await prisma.statistic.delete({ where: { id: req.params.id } });
+    if (s) await logChange(s.companyId, 'structure', 'delete', `Видалено статистику «${s.name}»`, req.body?.author);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
 // ── Журнал змін + технічні логи ───────────────────────────
 api.get('/companies/:id/changes', async (req, res) => {
   try {

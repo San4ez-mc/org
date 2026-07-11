@@ -70,6 +70,7 @@ model Company {
   proposals    Proposal[]
   embeddings   InstructionEmbedding[]
   changes      ChangeLog[]
+  statistics   Statistic[]
 }
 
 // ── Оргсхема (джерело зв'язків; Google Sheet — дзеркало) ───
@@ -97,6 +98,7 @@ model OrgUnit {
   instructions Instruction[]
   ownedProcess Process[]     @relation("ProcessOwner")
   driveFolder  DriveFolder?
+  statistics   Statistic[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -104,6 +106,25 @@ model OrgUnit {
   @@index([companyId])
   @@index([parentId])
   @@index([companyId, type])
+}
+
+// ── Статистики по ЦКП (адмін-технологія: вимірюваний показник одиниці + тренд) ──
+model Statistic {
+  id        String   @id @default(uuid())
+  companyId String
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  orgUnitId String
+  orgUnit   OrgUnit  @relation(fields: [orgUnitId], references: [id], onDelete: Cascade)
+  name      String // що вимірюємо (напр. "Дохід", "К-ть закритих угод")
+  unit      String? // одиниця виміру: грн, шт, %, ...
+  higherIsBetter Boolean @default(true) // напрямок «добре» (вгору чи вниз)
+  points    Json     @default("[]") // [{ date: "2026-07-01", value: 123 }]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([companyId])
+  @@index([orgUnitId])
 }
 
 // ── Працівник (людина; може обіймати кілька посад) ─────────
