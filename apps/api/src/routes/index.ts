@@ -85,7 +85,7 @@ api.get('/companies/:id', async (req, res) => {
 // ── Працівники (люди) ─────────────────────────────────────
 api.post('/companies/:id/members', async (req, res) => {
   try {
-    const { firstName, lastName, telegramUserId, telegramUsername, role, postUnitIds } = req.body ?? {};
+    const { firstName, lastName, telegramUserId, telegramUsername, email, birthDate, role, postUnitIds } = req.body ?? {};
     if (!firstName) return void res.status(400).json({ error: 'firstName обовʼязковий' });
     const member = await prisma.member.create({
       data: {
@@ -94,6 +94,8 @@ api.post('/companies/:id/members', async (req, res) => {
         lastName: lastName || null,
         telegramUserId: telegramUserId || null,
         telegramUsername: telegramUsername || null,
+        email: email || null,
+        birthDate: birthDate ? new Date(birthDate) : null,
         role: role || 'EMPLOYEE',
         posts: Array.isArray(postUnitIds) && postUnitIds.length ? { create: postUnitIds.map((pid: string) => ({ postUnitId: pid })) } : undefined,
       },
@@ -108,14 +110,16 @@ api.post('/companies/:id/members', async (req, res) => {
 
 api.patch('/members/:id', async (req, res) => {
   try {
-    const { firstName, lastName, telegramUserId, telegramUsername, photoUrl, role } = req.body ?? {};
+    const { firstName, lastName, telegramUserId, telegramUsername, email, birthDate, photoUrl, role } = req.body ?? {};
     const member = await prisma.member.update({
       where: { id: req.params.id },
       data: {
         ...(firstName !== undefined && { firstName }),
         ...(lastName !== undefined && { lastName }),
-        ...(telegramUserId !== undefined && { telegramUserId }),
-        ...(telegramUsername !== undefined && { telegramUsername }),
+        ...(telegramUserId !== undefined && { telegramUserId: telegramUserId || null }),
+        ...(telegramUsername !== undefined && { telegramUsername: telegramUsername || null }),
+        ...(email !== undefined && { email: email || null }),
+        ...(birthDate !== undefined && { birthDate: birthDate ? new Date(birthDate) : null }),
         ...(photoUrl !== undefined && { photoUrl }),
         ...(role !== undefined && { role }),
       },

@@ -47,6 +47,8 @@ export interface Member {
   lastName: string | null;
   telegramUserId: string | null;
   telegramUsername: string | null;
+  email: string | null;
+  birthDate: string | null;
   photoUrl: string | null;
   role: string;
   posts: MemberPost[];

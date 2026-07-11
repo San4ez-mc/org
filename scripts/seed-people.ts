@@ -23,8 +23,12 @@ async function main() {
   const count = Number(countStr || 200);
   if (!companyId) throw new Error('yarn tsx scripts/seed-people.ts <companyId> <count>');
 
-  const posts = await prisma.orgUnit.findMany({ where: { companyId, type: 'POST' }, select: { id: true } });
-  if (!posts.length) throw new Error('У компанії немає посад');
+  // Не чіпаємо керівницькі посади (голова відділення / керівник відділу — один тримач)
+  const posts = await prisma.orgUnit.findMany({
+    where: { companyId, type: 'POST', name: { notIn: ['Голова відділення', 'Керівник відділу'] } },
+    select: { id: true },
+  });
+  if (!posts.length) throw new Error('У компанії немає звичайних посад');
 
   let created = 0;
   for (let i = 0; i < count; i++) {

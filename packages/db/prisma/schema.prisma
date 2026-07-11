@@ -116,6 +116,8 @@ model Member {
   telegramUserId   String?
   telegramUsername String?
   photoUrl         String?
+  email            String?
+  birthDate        DateTime?
   role             MemberRole @default(EMPLOYEE)
 
   createdAt DateTime @default(now())

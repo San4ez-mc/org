@@ -20,6 +20,11 @@ export async function addMember(companyId: string, data: { firstName: string; la
   revalidatePath(`/company/${companyId}`);
 }
 
+export async function updateMember(companyId: string, memberId: string, data: { firstName?: string; lastName?: string; telegramUserId?: string; telegramUsername?: string; email?: string; birthDate?: string }) {
+  await call(`/members/${memberId}`, 'PATCH', data);
+  revalidatePath(`/company/${companyId}`);
+}
+
 export async function deleteMember(companyId: string, memberId: string) {
   await call(`/members/${memberId}`, 'DELETE');
   revalidatePath(`/company/${companyId}`);
