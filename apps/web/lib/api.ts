@@ -26,6 +26,9 @@ export interface ProcessStep {
   postTitle: string;
   action: string;
   result: string;
+  comment?: string;
+  problem?: boolean;
+  automatable?: boolean;
 }
 
 export interface Process {
