@@ -1,7 +1,7 @@
 'use client';
 import { useState, useTransition } from 'react';
 import type { OrgUnit, Member } from '@/lib/api';
-import { updateOrgUnit } from '@/app/company/[id]/actions';
+import { updateOrgUnit, addPost, deleteUnit } from '@/app/company/[id]/actions';
 
 const DIVISION_PAEI: Record<number, 'P' | 'A' | 'E' | 'I'> = { 7: 'E', 1: 'I', 2: 'E', 3: 'A', 4: 'P', 5: 'A', 6: 'I' };
 const BOARD_ORDER = [7, 1, 2, 3, 4, 5, 6];
@@ -26,13 +26,39 @@ export default function OrgBoard({ units, members, companyId }: { units: OrgUnit
 
   const PostChip = ({ p }: { p: OrgUnit }) => {
     const people = peopleOf(p.id);
+    const [, startDel] = useTransition();
     return (
-      <div style={{ fontSize: 11.5, background: 'hsl(var(--muted))', borderRadius: 6, padding: '3px 7px', marginBottom: 4 }}>
-        {p.name}
-        {showPeople && (
-          <span style={{ color: 'hsl(var(--muted-foreground))' }}> · {people.length ? people.join(', ') : 'вакансія'}</span>
-        )}
+      <div style={{ fontSize: 11.5, background: 'hsl(var(--muted))', borderRadius: 6, padding: '3px 7px', marginBottom: 4, display: 'flex', justifyContent: 'space-between', gap: 6 }}>
+        <span>
+          {p.name}
+          {showPeople && <span style={{ color: 'hsl(var(--muted-foreground))' }}> · {people.length ? people.join(', ') : 'вакансія'}</span>}
+        </span>
+        <button
+          title="Видалити посаду"
+          onClick={() => { if (confirm(`Видалити посаду «${p.name}»?`)) startDel(() => deleteUnit(companyId, p.id)); }}
+          style={{ background: 'none', border: 'none', color: 'hsl(var(--muted-foreground))', cursor: 'pointer', padding: 0, fontSize: 13, lineHeight: 1 }}
+        >
+          ×
+        </button>
       </div>
+    );
+  };
+
+  const AddPost = ({ parentId }: { parentId: string }) => {
+    const [adding, setAdding] = useState(false);
+    const [name, setName] = useState('');
+    const [, startAdd] = useTransition();
+    if (!adding) return <button onClick={() => setAdding(true)} style={{ background: 'none', border: '1px dashed hsl(var(--border))', color: 'hsl(var(--muted-foreground))', borderRadius: 6, padding: '3px 7px', fontSize: 11, cursor: 'pointer', width: '100%', marginTop: 2 }}>+ посада</button>;
+    return (
+      <input
+        autoFocus
+        value={name}
+        placeholder="Назва посади"
+        onChange={(e) => setName(e.target.value)}
+        onBlur={() => setAdding(false)}
+        onKeyDown={(e) => { if (e.key === 'Enter' && name.trim()) { startAdd(() => addPost(companyId, parentId, name.trim())); setName(''); setAdding(false); } if (e.key === 'Escape') setAdding(false); }}
+        style={{ fontSize: 11.5, background: 'hsl(var(--background))', border: '1px solid hsl(var(--primary))', borderRadius: 6, padding: '3px 6px', width: '100%', marginTop: 2 }}
+      />
     );
   };
 
@@ -99,7 +125,10 @@ export default function OrgBoard({ units, members, companyId }: { units: OrgUnit
                         <div key={dep.id} style={{ background: 'hsl(var(--background))', border: '1px solid hsl(var(--border))', borderRadius: 8, padding: 8 }}>
                           <Editable companyId={companyId} unitId={dep.id} field="name" value={dep.name} />
                           <Editable companyId={companyId} unitId={dep.id} field="ckp" value={dep.ckp ?? ''} prefix="ЦКП: " small />
-                          {dPosts.map((p) => <PostChip key={p.id} p={p} />)}
+                          <div style={{ marginTop: 4 }}>
+                            {dPosts.map((p) => <PostChip key={p.id} p={p} />)}
+                            <AddPost parentId={dep.id} />
+                          </div>
                         </div>
                       );
                     })}
@@ -109,6 +138,7 @@ export default function OrgBoard({ units, members, companyId }: { units: OrgUnit
                     <div style={{ marginTop: 10 }}>
                       <div style={{ fontSize: 10, color: 'hsl(var(--muted-foreground))', marginBottom: 4 }}>Посади:</div>
                       {posts.map((p) => <PostChip key={p.id} p={p} />)}
+                      <AddPost parentId={d.id} />
                     </div>
                   )}
                 </div>

@@ -40,3 +40,15 @@ export async function updateOrgUnit(companyId: string, unitId: string, data: { n
   revalidatePath(`/company/${companyId}`);
   revalidatePath(`/company/${companyId}/structure`);
 }
+
+export async function addPost(companyId: string, parentId: string, name: string) {
+  await call(`/companies/${companyId}/org-units`, 'POST', { parentId, name, type: 'POST', author: 'пульт' });
+  revalidatePath(`/company/${companyId}/structure`);
+  revalidatePath(`/company/${companyId}`);
+}
+
+export async function deleteUnit(companyId: string, unitId: string) {
+  await call(`/org-units/${unitId}`, 'DELETE', { author: 'пульт' });
+  revalidatePath(`/company/${companyId}/structure`);
+  revalidatePath(`/company/${companyId}`);
+}
