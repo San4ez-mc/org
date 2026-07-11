@@ -104,3 +104,16 @@ export async function getLogs(): Promise<EventLog[]> {
   const { logs } = await api<{ logs: EventLog[] }>(`/logs`);
   return logs;
 }
+
+export interface DriveNode {
+  id: string;
+  name: string;
+  isFolder: boolean;
+  webViewLink?: string;
+  children?: DriveNode[];
+}
+
+export async function getInstructions(companyId: string): Promise<DriveNode[]> {
+  const { tree } = await api<{ tree: DriveNode[] }>(`/companies/${companyId}/instructions`);
+  return tree;
+}

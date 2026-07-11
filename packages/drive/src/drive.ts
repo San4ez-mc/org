@@ -206,6 +206,53 @@ export async function listFolderFiles(folderId: string): Promise<DriveFileInfo[]
   return out;
 }
 
+export interface DriveNode {
+  id: string;
+  name: string;
+  mimeType: string;
+  webViewLink?: string;
+  isFolder: boolean;
+  children?: DriveNode[];
+}
+
+/** Знайти дочірню теку за назвою (для навігації шляхом). */
+export async function findFolderByName(parentId: string, name: string): Promise<string | null> {
+  return findChild(parentId, name, FOLDER_MIME);
+}
+
+/** Побудувати дерево вмісту теки (папки + файли з посиланням), рекурсивно. */
+export async function listFolderTree(folderId: string, depth = 6): Promise<DriveNode[]> {
+  if (depth < 0) return [];
+  const drive = getDrive();
+  const out: DriveNode[] = [];
+  let pageToken: string | undefined;
+  do {
+    const res = await withRetry(() =>
+      drive.files.list({
+        q: `'${folderId}' in parents and trashed = false`,
+        fields: 'nextPageToken, files(id, name, mimeType, webViewLink)',
+        orderBy: 'folder,name',
+        pageSize: 200,
+        pageToken,
+        ...SHARED_DRIVE_PARAMS,
+      }),
+    );
+    for (const f of res.data.files ?? []) {
+      const isFolder = f.mimeType === FOLDER_MIME;
+      out.push({
+        id: f.id!,
+        name: f.name!,
+        mimeType: f.mimeType!,
+        webViewLink: f.webViewLink ?? undefined,
+        isFolder,
+        children: isFolder ? await listFolderTree(f.id!, depth - 1) : undefined,
+      });
+    }
+    pageToken = res.data.nextPageToken ?? undefined;
+  } while (pageToken);
+  return out;
+}
+
 /** Прочитати текст файлу: Google Doc → export text/plain; text/* → media. Інакше null. */
 export async function readFileText(file: DriveFileInfo): Promise<string | null> {
   const drive = getDrive();

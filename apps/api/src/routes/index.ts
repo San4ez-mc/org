@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { prisma } from '@platform/db';
+import { findFolderByName, listFolderTree } from '@platform/drive';
 import { requireApiSecret } from '../middleware/auth';
 import { handleAct } from '../services/agent';
 
@@ -196,6 +197,22 @@ api.delete('/org-units/:id', async (req, res) => {
     await prisma.orgUnit.delete({ where: { id: req.params.id } });
     if (unit) await logChange(unit.companyId, 'structure', 'delete', `Видалено: ${unit.name}`, req.body?.author);
     res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+// ── Дерево посадових інструкцій (з Drive: Побудова → Посадові інструкції) ──
+api.get('/companies/:id/instructions', async (req, res) => {
+  try {
+    const company = await prisma.company.findUnique({ where: { id: req.params.id }, select: { driveRootFolderId: true } });
+    if (!company?.driveRootFolderId) return void res.json({ tree: [], reason: 'no-drive' });
+    const pobudova = await findFolderByName(company.driveRootFolderId, '1. Відділення побудови');
+    if (!pobudova) return void res.json({ tree: [], reason: 'no-pobudova' });
+    const instr = await findFolderByName(pobudova, 'Посадові інструкції');
+    if (!instr) return void res.json({ tree: [], reason: 'no-instructions-folder' });
+    const tree = await listFolderTree(instr);
+    res.json({ tree });
   } catch (err) {
     res.status(500).json({ error: String(err) });
   }
