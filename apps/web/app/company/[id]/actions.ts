@@ -68,6 +68,7 @@ export async function addProcess(companyId: string, name: string) {
 export async function updateProcess(companyId: string, processId: string, data: { name?: string; description?: string; steps?: Step[]; graph?: unknown }) {
   await call(`/processes/${processId}`, 'PATCH', { ...data, author: 'пульт' });
   revalidatePath(`/company/${companyId}/processes`);
+  revalidatePath(`/company/${companyId}/processes/${processId}`);
 }
 
 export async function deleteProcess(companyId: string, processId: string) {

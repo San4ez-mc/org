@@ -1,5 +1,6 @@
 'use client';
 import { useState, useTransition } from 'react';
+import { useRouter } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import type { Process, ProcessStep } from '@/lib/api';
 import MermaidView from '@/components/MermaidView';
@@ -20,6 +21,7 @@ export default function ProcessEditor({ companyId, process, postTitles }: { comp
   const [description, setDescription] = useState(process.description ?? '');
   const [steps, setSteps] = useState<ProcessStep[]>(process.steps ?? []);
   const [pending, start] = useTransition();
+  const router = useRouter();
 
   const setStep = (i: number, k: keyof ProcessStep, v: string) => setSteps((s) => s.map((st, j) => (j === i ? { ...st, [k]: v } : st)));
   const toggleFlag = (i: number, k: 'problem' | 'automatable') => setSteps((s) => s.map((st, j) => (j === i ? { ...st, [k]: !st[k] } : st)));
@@ -49,7 +51,7 @@ export default function ProcessEditor({ companyId, process, postTitles }: { comp
             <>
               <button style={{ ...ghost, ...(canvas ? { borderColor: 'hsl(var(--primary))', color: 'hsl(var(--primary))' } : {}) }} onClick={() => setCanvas((v) => !v)}>{canvas ? 'Сховати схему' : '◆ Схема'}</button>
               <button style={ghost} onClick={() => setEditing(true)}>Кроки</button>
-              <button style={ghost} onClick={() => { if (confirm('Видалити процес?')) start(() => deleteProcess(companyId, process.id)); }}>Видалити</button>
+              <button style={ghost} onClick={() => { if (confirm('Видалити процес?')) start(async () => { await deleteProcess(companyId, process.id); router.push(`/company/${companyId}/processes`); }); }}>Видалити</button>
             </>
           )}
         </div>
