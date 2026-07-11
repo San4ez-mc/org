@@ -31,12 +31,30 @@ export interface ProcessStep {
   automatable?: boolean;
 }
 
+export interface ProcessGraphNode {
+  id: string;
+  type?: string; // 'step' | 'decision' | 'start' | 'end'
+  position: { x: number; y: number };
+  data: { label: string; postTitle?: string; kind?: string };
+}
+export interface ProcessGraphEdge {
+  id: string;
+  source: string;
+  target: string;
+  label?: string;
+}
+export interface ProcessGraph {
+  nodes: ProcessGraphNode[];
+  edges: ProcessGraphEdge[];
+}
+
 export interface Process {
   id: string;
   name: string;
   description: string | null;
   steps: ProcessStep[] | null;
   diagram: string | null;
+  graph: ProcessGraph | null;
 }
 
 export interface MemberPost {

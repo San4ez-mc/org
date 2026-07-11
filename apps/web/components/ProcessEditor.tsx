@@ -1,8 +1,11 @@
 'use client';
 import { useState, useTransition } from 'react';
+import dynamic from 'next/dynamic';
 import type { Process, ProcessStep } from '@/lib/api';
 import MermaidView from '@/components/MermaidView';
 import { updateProcess, deleteProcess } from '@/app/company/[id]/actions';
+
+const ProcessCanvas = dynamic(() => import('@/components/ProcessCanvas'), { ssr: false, loading: () => <div style={{ padding: 16, color: 'hsl(var(--muted-foreground))', fontSize: 13 }}>Завантаження схеми…</div> });
 
 const card = { background: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: 'var(--radius)' } as const;
 const muted = { color: 'hsl(var(--muted-foreground))' } as const;
@@ -12,6 +15,7 @@ const primary = { background: 'hsl(var(--primary))', color: '#fff', border: 'non
 
 export default function ProcessEditor({ companyId, process, postTitles }: { companyId: string; process: Process; postTitles: string[] }) {
   const [editing, setEditing] = useState(false);
+  const [canvas, setCanvas] = useState(false);
   const [name, setName] = useState(process.name);
   const [description, setDescription] = useState(process.description ?? '');
   const [steps, setSteps] = useState<ProcessStep[]>(process.steps ?? []);
@@ -43,20 +47,23 @@ export default function ProcessEditor({ companyId, process, postTitles }: { comp
             </>
           ) : (
             <>
-              <button style={ghost} onClick={() => setEditing(true)}>Редагувати</button>
+              <button style={{ ...ghost, ...(canvas ? { borderColor: 'hsl(var(--primary))', color: 'hsl(var(--primary))' } : {}) }} onClick={() => setCanvas((v) => !v)}>{canvas ? 'Сховати схему' : '◆ Схема'}</button>
+              <button style={ghost} onClick={() => setEditing(true)}>Кроки</button>
               <button style={ghost} onClick={() => { if (confirm('Видалити процес?')) start(() => deleteProcess(companyId, process.id)); }}>Видалити</button>
             </>
           )}
         </div>
       </div>
 
-      {editing ? (
+      {canvas && <ProcessCanvas companyId={companyId} process={process} postTitles={postTitles} onClose={() => setCanvas(false)} />}
+
+      {!canvas && (editing ? (
         <textarea style={{ ...input, marginTop: 8, minHeight: 44 }} placeholder="Опис процесу" value={description} onChange={(e) => setDescription(e.target.value)} />
       ) : (
         process.description && <div style={{ fontSize: 12.5, ...muted, margin: '6px 0 0' }}>{process.description}</div>
-      )}
+      ))}
 
-      {editing ? (
+      {!canvas && (editing ? (
         <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
           {steps.map((s, i) => (
             <div key={i} style={{ ...card, padding: 8, display: 'flex', flexDirection: 'column', gap: 6, background: s.problem ? 'rgba(224,122,122,0.07)' : 'hsl(var(--background))' }}>
@@ -120,7 +127,7 @@ export default function ProcessEditor({ companyId, process, postTitles }: { comp
             ))}
           </div>
         </>
-      )}
+      ))}
     </div>
   );
 }

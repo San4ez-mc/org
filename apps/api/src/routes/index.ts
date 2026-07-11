@@ -239,7 +239,7 @@ api.post('/companies/:id/processes', async (req, res) => {
 
 api.patch('/processes/:id', async (req, res) => {
   try {
-    const { name, description, steps } = req.body ?? {};
+    const { name, description, steps, graph } = req.body ?? {};
     const data: Record<string, unknown> = {};
     if (name !== undefined) data.name = name;
     if (description !== undefined) data.description = description;
@@ -247,6 +247,7 @@ api.patch('/processes/:id', async (req, res) => {
       data.steps = steps;
       data.diagram = stepsToMermaid(steps); // перегенерувати діаграму з кроків
     }
+    if (graph !== undefined) data.graph = graph; // візуальна схема (React Flow)
     const process = await prisma.process.update({ where: { id: req.params.id }, data });
     await logChange(process.companyId, 'process', 'update', `Оновлено процес: ${process.name}`, req.body?.author);
     res.json({ process });

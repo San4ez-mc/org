@@ -58,14 +58,14 @@ export async function deleteUnit(companyId: string, unitId: string) {
   revalidatePath(`/company/${companyId}`);
 }
 
-interface Step { postTitle: string; action: string; result: string }
+interface Step { postTitle: string; action: string; result: string; comment?: string; problem?: boolean; automatable?: boolean }
 
 export async function addProcess(companyId: string, name: string) {
   await call(`/companies/${companyId}/processes`, 'POST', { name, author: 'пульт' });
   revalidatePath(`/company/${companyId}/processes`);
 }
 
-export async function updateProcess(companyId: string, processId: string, data: { name?: string; description?: string; steps?: Step[] }) {
+export async function updateProcess(companyId: string, processId: string, data: { name?: string; description?: string; steps?: Step[]; graph?: unknown }) {
   await call(`/processes/${processId}`, 'PATCH', { ...data, author: 'пульт' });
   revalidatePath(`/company/${companyId}/processes`);
 }
