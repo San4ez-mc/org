@@ -1,72 +1,33 @@
 import { getCompany, type OrgUnit } from '@/lib/api';
-import CompanyTabs from '@/components/CompanyTabs';
-import MermaidView from '@/components/MermaidView';
+import CompanyHeader from '@/components/CompanyTabs';
+import ProcessEditor from '@/components/ProcessEditor';
+import AddProcessButton from '@/components/AddProcessButton';
 
 export const dynamic = 'force-dynamic';
 
-const card = { background: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: 'var(--radius)' } as const;
-const muted = { color: 'hsl(var(--muted-foreground))' } as const;
-
 export default async function ProcessesPage({ params }: { params: { id: string } }) {
-  let company;
-  try {
-    company = await getCompany(params.id);
-  } catch {
-    return <p style={muted}>Компанію не знайдено або API недоступний.</p>;
-  }
+  const company = await getCompany(params.id).catch(() => null);
+  if (!company) return <p style={{ color: 'hsl(var(--muted-foreground))' }}>Компанію не знайдено.</p>;
 
-  const holderOf = (title: string): string => {
-    const post = company.orgUnits.find((u: OrgUnit) => u.type === 'POST' && u.name.trim().toLowerCase() === title.trim().toLowerCase());
-    return !post || post.isVacant || !post.holderName ? '' : post.holderName;
-  };
-
+  const postTitles = [...new Set(company.orgUnits.filter((u: OrgUnit) => u.type === 'POST').map((p) => p.name))]
+    .filter((n) => n !== 'Голова відділення' && n !== 'Керівник відділу');
   const processes = company.processes ?? [];
 
   return (
     <div>
-      <CompanyTabs company={company} active="/processes" />
+      <CompanyHeader company={company} />
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', margin: '4px 0 14px' }}>
+        <h2 style={{ fontSize: 16, fontWeight: 600 }}>Бізнес-процеси ({processes.length})</h2>
+        <AddProcessButton companyId={company.id} />
+      </div>
 
       {processes.length === 0 ? (
-        <p style={muted}>Бізнес-процесів ще немає. Вони створюються під час онбордингу компанії ботом.</p>
+        <p style={{ color: 'hsl(var(--muted-foreground))' }}>Процесів ще немає. Додай перший — або згенеруй ботом.</p>
       ) : (
         <div style={{ display: 'grid', gap: 14 }}>
-          {processes.map((pr) => {
-            const steps = pr.steps ?? [];
-            const owner = steps.length ? steps[steps.length - 1].postTitle : '';
-            return (
-              <div key={pr.id} style={{ ...card, padding: 16 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
-                  <div style={{ fontWeight: 600, fontSize: 15 }}>{pr.name}</div>
-                  {owner && <div style={{ fontSize: 12, ...muted }}>відповідальний за результат: <b>{owner}</b>{holderOf(owner) ? ` (${holderOf(owner)})` : ''}</div>}
-                </div>
-                {pr.description && <div style={{ fontSize: 12.5, ...muted, margin: '6px 0 14px' }}>{pr.description}</div>}
-
-                {/* Swimlane-діаграма */}
-                {pr.diagram && (
-                  <div style={{ border: '1px solid hsl(var(--border))', borderRadius: 8, padding: 12, marginBottom: 14, background: 'hsl(var(--background))' }}>
-                    <MermaidView code={pr.diagram} id={pr.id} />
-                  </div>
-                )}
-
-                {/* Кроки списком */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
-                  {steps.map((s, i) => (
-                    <div key={i} style={{ display: 'grid', gridTemplateColumns: '28px 200px 1fr', gap: 12, alignItems: 'start', padding: '10px 0', borderTop: i ? '1px dashed hsl(var(--border))' : 'none' }}>
-                      <span style={{ ...muted, fontSize: 13, fontWeight: 600 }}>{i + 1}</span>
-                      <span style={{ fontSize: 13 }}>
-                        <b>{s.postTitle}</b>
-                        {holderOf(s.postTitle) && <span style={muted}> · {holderOf(s.postTitle)}</span>}
-                      </span>
-                      <span style={{ fontSize: 13 }}>
-                        {s.action}
-                        {s.result && <div style={{ ...muted, fontSize: 12, marginTop: 2 }}>→ {s.result}</div>}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            );
-          })}
+          {processes.map((pr) => (
+            <ProcessEditor key={pr.id} companyId={company.id} process={pr} postTitles={postTitles} />
+          ))}
         </div>
       )}
     </div>

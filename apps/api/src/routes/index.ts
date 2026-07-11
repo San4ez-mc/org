@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { prisma } from '@platform/db';
 import { findFolderByName, listFolderTree } from '@platform/drive';
+import { stepsToMermaid } from '@platform/ai';
 import { requireApiSecret } from '../middleware/auth';
 import { handleAct } from '../services/agent';
 
@@ -217,6 +218,49 @@ api.get('/companies/:id/instructions', async (req, res) => {
     if (!instr) return void res.json({ tree: [], reason: 'no-instructions-folder' });
     const tree = await listFolderTree(instr);
     res.json({ tree });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+// ── Редагування процесів ──────────────────────────────────
+api.post('/companies/:id/processes', async (req, res) => {
+  try {
+    const { name } = req.body ?? {};
+    const process = await prisma.process.create({
+      data: { companyId: req.params.id, name: name || 'Новий процес', description: '', steps: [], diagram: null },
+    });
+    await logChange(req.params.id, 'process', 'create', `Створено процес: ${process.name}`, req.body?.author);
+    res.json({ process });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+api.patch('/processes/:id', async (req, res) => {
+  try {
+    const { name, description, steps } = req.body ?? {};
+    const data: Record<string, unknown> = {};
+    if (name !== undefined) data.name = name;
+    if (description !== undefined) data.description = description;
+    if (Array.isArray(steps)) {
+      data.steps = steps;
+      data.diagram = stepsToMermaid(steps); // перегенерувати діаграму з кроків
+    }
+    const process = await prisma.process.update({ where: { id: req.params.id }, data });
+    await logChange(process.companyId, 'process', 'update', `Оновлено процес: ${process.name}`, req.body?.author);
+    res.json({ process });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+api.delete('/processes/:id', async (req, res) => {
+  try {
+    const p = await prisma.process.findUnique({ where: { id: req.params.id }, select: { companyId: true, name: true } });
+    await prisma.process.delete({ where: { id: req.params.id } });
+    if (p) await logChange(p.companyId, 'process', 'delete', `Видалено процес: ${p.name}`, req.body?.author);
+    res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: String(err) });
   }

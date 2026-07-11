@@ -57,3 +57,20 @@ export async function deleteUnit(companyId: string, unitId: string) {
   revalidatePath(`/company/${companyId}/structure`);
   revalidatePath(`/company/${companyId}`);
 }
+
+interface Step { postTitle: string; action: string; result: string }
+
+export async function addProcess(companyId: string, name: string) {
+  await call(`/companies/${companyId}/processes`, 'POST', { name, author: 'пульт' });
+  revalidatePath(`/company/${companyId}/processes`);
+}
+
+export async function updateProcess(companyId: string, processId: string, data: { name?: string; description?: string; steps?: Step[] }) {
+  await call(`/processes/${processId}`, 'PATCH', { ...data, author: 'пульт' });
+  revalidatePath(`/company/${companyId}/processes`);
+}
+
+export async function deleteProcess(companyId: string, processId: string) {
+  await call(`/processes/${processId}`, 'DELETE', { author: 'пульт' });
+  revalidatePath(`/company/${companyId}/processes`);
+}
