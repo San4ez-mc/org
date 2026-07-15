@@ -74,7 +74,8 @@ export default function OrgBoard({ units, members, companyId }: { units: OrgUnit
           <input type="checkbox" checked={showPeople} onChange={(e) => setShowPeople(e.target.checked)} /> показувати людей
         </label>
 
-        <div style={{ display: 'flex', gap: 10, marginLeft: 'auto', flexWrap: 'wrap' }}>
+        <div title="Кольори відділень за системою Адізеса" style={{ display: 'flex', alignItems: 'center', gap: 10, marginLeft: 'auto', flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 11, color: 'hsl(var(--muted-foreground))', fontWeight: 600 }}>PAEI (Адізес):</span>
           {([['P', 'Виробник'], ['A', 'Адміністратор'], ['E', 'Підприємець'], ['I', 'Інтегратор']] as const).map(([r, n]) => (
             <span key={r} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: 'hsl(var(--muted-foreground))' }}>
               <span style={{ width: 10, height: 10, borderRadius: 3, background: PAEI_COLOR[r] }} /> {r} · {n}
