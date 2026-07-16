@@ -5,6 +5,7 @@ import { findFolderByName, listFolderTree } from '@platform/drive';
 import { stepsToMermaid } from '@platform/ai';
 import { requireApiSecret } from '../middleware/auth';
 import { handleAct } from '../services/agent';
+import { fetchTelegramProfilePhoto } from '../services/telegramPhoto';
 
 /**
  * Контракт API платформи (§8 PLAN_PHASE1.md).
@@ -163,6 +164,41 @@ api.delete('/members/:id/posts/:postUnitId', async (req, res) => {
   try {
     await prisma.memberPost.deleteMany({ where: { memberId: req.params.id, postUnitId: req.params.postUnitId } });
     res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+// Підтягнути аватарку працівника з Telegram (getUserProfilePhotos) і зберегти в БД
+api.post('/members/:id/telegram-photo', async (req, res) => {
+  try {
+    const m = await prisma.member.findUnique({ where: { id: req.params.id }, select: { id: true, telegramUserId: true } });
+    if (!m) return void res.status(404).json({ error: 'not found' });
+    if (!m.telegramUserId) return void res.status(400).json({ error: 'У працівника не вказано Telegram id' });
+
+    const photo = await fetchTelegramProfilePhoto(m.telegramUserId);
+    if (!photo) return void res.json({ found: false });
+
+    const now = new Date();
+    const member = await prisma.member.update({
+      where: { id: m.id },
+      data: { photoData: photo.data, photoMime: photo.mime, photoUpdatedAt: now, photoUrl: `/photo/${m.id}?t=${now.getTime()}` },
+      select: { id: true, photoUrl: true, photoUpdatedAt: true },
+    });
+    res.json({ found: true, member });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+// Віддати збережений бінарник фото (проксіюється через веб-пульт, бо API не дивиться зовні)
+api.get('/members/:id/photo', async (req, res) => {
+  try {
+    const m = await prisma.member.findUnique({ where: { id: req.params.id }, select: { photoData: true, photoMime: true } });
+    if (!m?.photoData) return void res.status(404).end();
+    res.setHeader('Content-Type', m.photoMime || 'image/jpeg');
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    res.send(m.photoData);
   } catch (err) {
     res.status(500).json({ error: String(err) });
   }

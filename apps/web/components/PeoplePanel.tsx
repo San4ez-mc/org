@@ -1,7 +1,7 @@
 'use client';
 import { useState, useTransition, useMemo } from 'react';
 import type { Member } from '@/lib/api';
-import { addMember, updateMember, deleteMember, assignPost, unassignPost, generateAccessToken } from '@/app/company/[id]/actions';
+import { addMember, updateMember, deleteMember, assignPost, unassignPost, generateAccessToken, refreshMemberPhoto } from '@/app/company/[id]/actions';
 
 interface PostOpt { id: string; name: string; division: string }
 const PER = 20;
@@ -20,11 +20,18 @@ export default function PeoplePanel({ companyId, members, posts }: { companyId: 
   const [editId, setEditId] = useState<string | null>(null);
   const [links, setLinks] = useState<Record<string, string>>({});
   const [copied, setCopied] = useState<string | null>(null);
+  const [photoMsg, setPhotoMsg] = useState<Record<string, string>>({});
 
   const makeLink = (memberId: string) => start(async () => {
     const t = await generateAccessToken(memberId);
     setLinks((l) => ({ ...l, [memberId]: t }));
     try { await navigator.clipboard.writeText(`${location.origin}/me/${t}`); setCopied(memberId); setTimeout(() => setCopied(null), 2000); } catch { /* clipboard недоступний */ }
+  });
+
+  const refreshPhoto = (memberId: string) => start(async () => {
+    const found = await refreshMemberPhoto(companyId, memberId);
+    setPhotoMsg((m) => ({ ...m, [memberId]: found ? '✓ фото оновлено' : 'фото в Telegram не знайдено' }));
+    setTimeout(() => setPhotoMsg((m) => { const { [memberId]: _drop, ...rest } = m; return rest; }), 3000);
   });
 
   const filtered = useMemo(() => {
@@ -77,7 +84,9 @@ export default function PeoplePanel({ companyId, members, posts }: { companyId: 
                     </div>
                   </div>
                 </div>
-                <div style={{ display: 'flex', gap: 6 }}>
+                <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                  {m.telegramUserId && <button style={ghost} title="Підтягнути аватарку з Telegram" onClick={() => refreshPhoto(m.id)}>📷 Фото з TG</button>}
+                  {photoMsg[m.id] && <span style={{ fontSize: 11.5, ...muted }}>{photoMsg[m.id]}</span>}
                   <button style={ghost} title="Особисте посилання входу для працівника" onClick={() => makeLink(m.id)}>🔗 Вхід</button>
                   <button style={ghost} onClick={() => setEditId(isEdit ? null : m.id)}>{isEdit ? 'Закрити' : 'Редагувати'}</button>
                   <button style={ghost} onClick={() => { if (confirm('Видалити працівника?')) start(() => deleteMember(companyId, m.id)); }}>Видалити</button>

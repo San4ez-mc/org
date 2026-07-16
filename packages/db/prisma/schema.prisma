@@ -136,7 +136,10 @@ model Member {
   lastName         String?
   telegramUserId   String?
   telegramUsername String?
-  photoUrl         String?
+  photoUrl         String? // стабільний шлях виду /photo/<id>, віддається через веб-проксі
+  photoData        Bytes?
+  photoMime        String?
+  photoUpdatedAt   DateTime?
   email            String?
   birthDate        DateTime?
   role             MemberRole @default(EMPLOYEE)

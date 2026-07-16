@@ -35,6 +35,12 @@ export async function generateAccessToken(memberId: string): Promise<string> {
   return token as string;
 }
 
+export async function refreshMemberPhoto(companyId: string, memberId: string): Promise<boolean> {
+  const { found } = await call(`/members/${memberId}/telegram-photo`, 'POST');
+  revalidatePath(`/company/${companyId}`);
+  return Boolean(found);
+}
+
 export async function assignPost(companyId: string, memberId: string, postUnitId: string) {
   await call(`/members/${memberId}/posts`, 'POST', { postUnitId });
   revalidatePath(`/company/${companyId}`);
