@@ -3,6 +3,7 @@ import { randomBytes } from 'crypto';
 import { prisma } from '@platform/db';
 import { findFolderByName, listFolderTree } from '@platform/drive';
 import { stepsToMermaid } from '@platform/ai';
+import { TEMPLATE_LIBRARY } from '@platform/org-template';
 import { requireApiSecret } from '../middleware/auth';
 import { handleAct } from '../services/agent';
 
@@ -430,6 +431,90 @@ api.get('/logs', async (req, res) => {
     const level = typeof req.query.level === 'string' ? req.query.level : undefined;
     const logs = await prisma.eventLog.findMany({ where: level ? { level } : undefined, orderBy: { createdAt: 'desc' }, take: 300 });
     res.json({ logs });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+// ── Бібліотека шаблонів (для консультанта: типові посади/процеси/інструкції по галузях) ──
+api.get('/templates', async (_req, res) => {
+  res.json({
+    templates: TEMPLATE_LIBRARY.map((t) => ({
+      key: t.key,
+      label: t.label,
+      description: t.description,
+      counts: { posts: t.posts.length, processes: t.processes.length, instructions: t.instructions.length },
+    })),
+  });
+});
+
+api.get('/templates/:key', async (req, res) => {
+  const template = TEMPLATE_LIBRARY.find((t) => t.key === req.params.key);
+  if (!template) return void res.status(404).json({ error: 'Шаблон не знайдено' });
+  res.json({ template });
+});
+
+// Клонувати шаблон галузі в компанію: додає типові посади/процеси/інструкції,
+// пропускаючи те, що вже є (за назвою) — безпечно викликати повторно.
+api.post('/companies/:id/templates/:key/clone', async (req, res) => {
+  try {
+    const companyId = req.params.id;
+    const template = TEMPLATE_LIBRARY.find((t) => t.key === req.params.key);
+    if (!template) return void res.status(404).json({ error: 'Шаблон не знайдено' });
+    const include = { structure: true, processes: true, instructions: true, ...(req.body?.include ?? {}) };
+    const author = req.body?.author;
+
+    const units = await prisma.orgUnit.findMany({ where: { companyId } });
+    const byNameLower = new Map(units.map((u) => [u.name.trim().toLowerCase(), u] as const));
+    const created = { posts: 0, processes: 0, instructions: 0 };
+    const skipped = { posts: 0, processes: 0, instructions: 0 };
+
+    if (include.structure) {
+      for (const p of template.posts) {
+        const key = p.title.trim().toLowerCase();
+        if (byNameLower.has(key)) { skipped.posts++; continue; }
+        const division = units.find((u) => u.type === 'DIVISION' && u.boardNo === p.divisionBoardNo);
+        if (!division) { skipped.posts++; continue; }
+        const unit = await prisma.orgUnit.create({
+          data: { companyId, parentId: division.id, type: 'POST', name: p.title, ckp: p.ckp || null, isVacant: true },
+        });
+        byNameLower.set(key, unit);
+        created.posts++;
+      }
+    }
+
+    if (include.processes) {
+      const existingProcessNames = new Set((await prisma.process.findMany({ where: { companyId }, select: { name: true } })).map((p) => p.name.trim().toLowerCase()));
+      for (const pr of template.processes) {
+        if (existingProcessNames.has(pr.name.trim().toLowerCase())) { skipped.processes++; continue; }
+        const steps = pr.steps.map((s) => ({ ...s, comment: '', problem: false, automatable: false }));
+        await prisma.process.create({
+          data: { companyId, name: pr.name, description: pr.description, steps, diagram: stepsToMermaid(steps) },
+        });
+        created.processes++;
+      }
+    }
+
+    if (include.instructions) {
+      const existingInstrTitles = new Set((await prisma.instruction.findMany({ where: { companyId }, select: { title: true } })).map((i) => i.title.trim().toLowerCase()));
+      for (const ins of template.instructions) {
+        if (existingInstrTitles.has(ins.title.trim().toLowerCase())) { skipped.instructions++; continue; }
+        const postUnit = byNameLower.get(ins.postTitle.trim().toLowerCase());
+        await prisma.instruction.create({
+          data: { companyId, postUnitId: postUnit?.id, title: ins.title, status: 'DRAFT' },
+        });
+        created.instructions++;
+      }
+    }
+
+    await logChange(
+      companyId,
+      'structure',
+      'create',
+      `Клоновано шаблон «${template.label}»: +${created.posts} посад, +${created.processes} процесів, +${created.instructions} інструкцій`,
+      author,
+    );
+    res.json({ created, skipped });
   } catch (err) {
     res.status(500).json({ error: String(err) });
   }

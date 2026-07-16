@@ -173,3 +173,29 @@ export async function getInstructions(companyId: string): Promise<DriveNode[]> {
   const { tree } = await api<{ tree: DriveNode[] }>(`/companies/${companyId}/instructions`);
   return tree;
 }
+
+export interface TemplateSummary {
+  key: string;
+  label: string;
+  description: string;
+  counts: { posts: number; processes: number; instructions: number };
+}
+
+export interface TemplateDetail {
+  key: string;
+  label: string;
+  description: string;
+  posts: { title: string; ckp?: string; divisionBoardNo: number }[];
+  processes: { name: string; description: string; steps: { postTitle: string; action: string; result: string }[] }[];
+  instructions: { postTitle: string; title: string; body: string }[];
+}
+
+export async function getTemplates(): Promise<TemplateSummary[]> {
+  const { templates } = await api<{ templates: TemplateSummary[] }>('/templates');
+  return templates;
+}
+
+export async function getTemplateDetail(key: string): Promise<TemplateDetail> {
+  const { template } = await api<{ template: TemplateDetail }>(`/templates/${key}`);
+  return template;
+}

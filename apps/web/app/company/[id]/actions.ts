@@ -1,5 +1,6 @@
 'use server';
 import { revalidatePath } from 'next/cache';
+import { getTemplateDetail, type TemplateDetail } from '@/lib/api';
 
 const BASE = process.env.ORG_API_URL ?? 'http://127.0.0.1:4100/api';
 const TOKEN = process.env.ORG_API_TOKEN ?? '';
@@ -100,4 +101,27 @@ export async function updateStatistic(companyId: string, statisticId: string, da
 export async function deleteStatistic(companyId: string, statisticId: string) {
   await call(`/statistics/${statisticId}`, 'DELETE', { author: 'пульт' });
   revalidatePath(`/company/${companyId}/stats`);
+}
+
+// ── Бібліотека шаблонів ────────────────────────────────────
+export interface CloneTemplateResult {
+  created: { posts: number; processes: number; instructions: number };
+  skipped: { posts: number; processes: number; instructions: number };
+}
+
+export async function cloneTemplate(
+  companyId: string,
+  key: string,
+  include: { structure: boolean; processes: boolean; instructions: boolean },
+): Promise<CloneTemplateResult> {
+  const result = await call(`/companies/${companyId}/templates/${key}/clone`, 'POST', { include, author: 'пульт' });
+  revalidatePath(`/company/${companyId}`);
+  revalidatePath(`/company/${companyId}/structure`);
+  revalidatePath(`/company/${companyId}/processes`);
+  revalidatePath(`/company/${companyId}/templates`);
+  return result as CloneTemplateResult;
+}
+
+export async function getTemplateDetailAction(key: string): Promise<TemplateDetail> {
+  return getTemplateDetail(key);
 }
