@@ -44,6 +44,17 @@ enum ProposalStatus {
   REJECTED
 }
 
+enum PolicyKind {
+  ORDER // наказ — разове розпорядження (напр. "Наказ №12 про відпустку")
+  POLICY // політика — постійно чинне правило компанії
+}
+
+enum PolicyStatus {
+  DRAFT
+  ACTIVE
+  ARCHIVED
+}
+
 // ── Компанія (тенант) ─────────────────────────────────────
 model Company {
   id                String   @id @default(uuid())
@@ -71,6 +82,7 @@ model Company {
   embeddings   InstructionEmbedding[]
   changes      ChangeLog[]
   statistics   Statistic[]
+  policies     Policy[]
 }
 
 // ── Оргсхема (джерело зв'язків; Google Sheet — дзеркало) ───
@@ -341,4 +353,24 @@ model Proposal {
 
   @@index([companyId, status])
   @@index([targetInstructionId])
+}
+
+// ── Кадрові накази/політики (розпорядження компанії окремо від посадових інструкцій) ──
+model Policy {
+  id            String       @id @default(uuid())
+  companyId     String
+  company       Company      @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  kind          PolicyKind
+  number        String? // номер наказу (напр. "12/2026"), для політик зазвичай не потрібен
+  title         String
+  body          String // текст наказу/політики
+  effectiveDate DateTime? // дата набуття чинності
+  status        PolicyStatus @default(ACTIVE)
+  author        String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([companyId])
+  @@index([companyId, kind])
 }

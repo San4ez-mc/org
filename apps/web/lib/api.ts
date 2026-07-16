@@ -173,3 +173,23 @@ export async function getInstructions(companyId: string): Promise<DriveNode[]> {
   const { tree } = await api<{ tree: DriveNode[] }>(`/companies/${companyId}/instructions`);
   return tree;
 }
+
+export type PolicyKind = 'ORDER' | 'POLICY';
+export type PolicyStatus = 'DRAFT' | 'ACTIVE' | 'ARCHIVED';
+
+export interface Policy {
+  id: string;
+  kind: PolicyKind;
+  number: string | null;
+  title: string;
+  body: string;
+  effectiveDate: string | null;
+  status: PolicyStatus;
+  author: string | null;
+  createdAt: string;
+}
+
+export async function getPolicies(companyId: string): Promise<Policy[]> {
+  const { policies } = await api<{ policies: Policy[] }>(`/companies/${companyId}/policies`);
+  return policies;
+}

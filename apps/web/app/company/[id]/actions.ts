@@ -101,3 +101,19 @@ export async function deleteStatistic(companyId: string, statisticId: string) {
   await call(`/statistics/${statisticId}`, 'DELETE', { author: 'пульт' });
   revalidatePath(`/company/${companyId}/stats`);
 }
+
+// ── Кадрові накази/політики ────────────────────────────────
+export async function addPolicy(companyId: string, data: { kind: string; title: string; body: string; number?: string; effectiveDate?: string }) {
+  await call(`/companies/${companyId}/policies`, 'POST', { ...data, author: 'пульт' });
+  revalidatePath(`/company/${companyId}/policies`);
+}
+
+export async function updatePolicy(companyId: string, policyId: string, data: { title?: string; body?: string; number?: string; effectiveDate?: string; status?: string }) {
+  await call(`/policies/${policyId}`, 'PATCH', { ...data, author: 'пульт' });
+  revalidatePath(`/company/${companyId}/policies`);
+}
+
+export async function deletePolicy(companyId: string, policyId: string) {
+  await call(`/policies/${policyId}`, 'DELETE', { author: 'пульт' });
+  revalidatePath(`/company/${companyId}/policies`);
+}

@@ -415,6 +415,74 @@ api.delete('/statistics/:id', async (req, res) => {
   }
 });
 
+// ── Кадрові накази/політики (розпорядження компанії окремо від посадових інструкцій) ──
+api.get('/companies/:id/policies', async (req, res) => {
+  try {
+    const kind = typeof req.query.kind === 'string' ? req.query.kind : undefined;
+    const policies = await prisma.policy.findMany({
+      where: { companyId: req.params.id, ...(kind && { kind: kind as never }) },
+      orderBy: [{ effectiveDate: 'desc' }, { createdAt: 'desc' }],
+    });
+    res.json({ policies });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+api.post('/companies/:id/policies', async (req, res) => {
+  try {
+    const { kind, title, body, number, effectiveDate, status } = req.body ?? {};
+    if (!kind || !title || !body) return void res.status(400).json({ error: 'kind, title і body обовʼязкові' });
+    const policy = await prisma.policy.create({
+      data: {
+        companyId: req.params.id,
+        kind,
+        title,
+        body,
+        number: number || null,
+        effectiveDate: effectiveDate ? new Date(effectiveDate) : null,
+        status: status || 'ACTIVE',
+        author: req.body?.author || null,
+      },
+    });
+    await logChange(req.params.id, 'structure', 'create', `${kind === 'ORDER' ? 'Наказ' : 'Політика'}: ${title}`, req.body?.author);
+    res.json({ policy });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+api.patch('/policies/:id', async (req, res) => {
+  try {
+    const { title, body, number, effectiveDate, status } = req.body ?? {};
+    const policy = await prisma.policy.update({
+      where: { id: req.params.id },
+      data: {
+        ...(title !== undefined && { title }),
+        ...(body !== undefined && { body }),
+        ...(number !== undefined && { number: number || null }),
+        ...(effectiveDate !== undefined && { effectiveDate: effectiveDate ? new Date(effectiveDate) : null }),
+        ...(status !== undefined && { status }),
+      },
+    });
+    await logChange(policy.companyId, 'structure', 'update', `Оновлено: ${policy.title}`, req.body?.author);
+    res.json({ policy });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+api.delete('/policies/:id', async (req, res) => {
+  try {
+    const p = await prisma.policy.findUnique({ where: { id: req.params.id }, select: { companyId: true, title: true } });
+    await prisma.policy.delete({ where: { id: req.params.id } });
+    if (p) await logChange(p.companyId, 'structure', 'delete', `Видалено: ${p.title}`, req.body?.author);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
 // ── Журнал змін + технічні логи ───────────────────────────
 api.get('/companies/:id/changes', async (req, res) => {
   try {
