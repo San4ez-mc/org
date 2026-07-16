@@ -415,6 +415,147 @@ api.delete('/statistics/:id', async (req, res) => {
   }
 });
 
+// ── Рекрутинг-воронка: вакансія → кандидати → найм → онбординг ──
+api.get('/companies/:id/vacancies', async (req, res) => {
+  try {
+    const vacancies = await prisma.vacancy.findMany({
+      where: { companyId: req.params.id },
+      include: { postUnit: { select: { id: true, name: true } }, candidates: { select: { id: true, stage: true } } },
+      orderBy: { createdAt: 'desc' },
+    });
+    res.json({ vacancies });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+api.post('/companies/:id/vacancies', async (req, res) => {
+  try {
+    const { title, postUnitId, description } = req.body ?? {};
+    if (!title) return void res.status(400).json({ error: 'title обовʼязковий' });
+    const vacancy = await prisma.vacancy.create({
+      data: { companyId: req.params.id, title, postUnitId: postUnitId || null, description: description || null },
+      include: { postUnit: { select: { id: true, name: true } }, candidates: true },
+    });
+    await logChange(req.params.id, 'structure', 'create', `Відкрито вакансію: ${title}`, req.body?.author);
+    res.json({ vacancy });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+api.get('/vacancies/:id', async (req, res) => {
+  try {
+    const vacancy = await prisma.vacancy.findUnique({
+      where: { id: req.params.id },
+      include: { postUnit: { select: { id: true, name: true } }, candidates: { orderBy: { createdAt: 'asc' } } },
+    });
+    if (!vacancy) return void res.status(404).json({ error: 'Вакансію не знайдено' });
+    res.json({ vacancy });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+api.patch('/vacancies/:id', async (req, res) => {
+  try {
+    const { title, description, status } = req.body ?? {};
+    const vacancy = await prisma.vacancy.update({
+      where: { id: req.params.id },
+      data: {
+        ...(title !== undefined && { title }),
+        ...(description !== undefined && { description: description || null }),
+        ...(status !== undefined && { status }),
+      },
+    });
+    await logChange(vacancy.companyId, 'structure', 'update', `Оновлено вакансію: ${vacancy.title}`, req.body?.author);
+    res.json({ vacancy });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+api.delete('/vacancies/:id', async (req, res) => {
+  try {
+    const v = await prisma.vacancy.findUnique({ where: { id: req.params.id }, select: { companyId: true, title: true } });
+    await prisma.vacancy.delete({ where: { id: req.params.id } });
+    if (v) await logChange(v.companyId, 'structure', 'delete', `Видалено вакансію: ${v.title}`, req.body?.author);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+api.post('/vacancies/:id/candidates', async (req, res) => {
+  try {
+    const { name, telegramUsername, email, phone } = req.body ?? {};
+    if (!name) return void res.status(400).json({ error: 'name обовʼязковий' });
+    const vacancy = await prisma.vacancy.findUnique({ where: { id: req.params.id }, select: { companyId: true, title: true } });
+    if (!vacancy) return void res.status(404).json({ error: 'Вакансію не знайдено' });
+    const candidate = await prisma.candidate.create({
+      data: { companyId: vacancy.companyId, vacancyId: req.params.id, name, telegramUsername: telegramUsername || null, email: email || null, phone: phone || null },
+    });
+    await logChange(vacancy.companyId, 'structure', 'create', `Новий кандидат «${name}» на вакансію «${vacancy.title}»`, req.body?.author);
+    res.json({ candidate });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+// Перевести кандидата в стадію HIRED: створює Member (запускає онбординг), займає посаду, закриває вакансію.
+async function hireCandidate(candidateId: string, author?: string) {
+  const candidate = await prisma.candidate.findUnique({ where: { id: candidateId }, include: { vacancy: true } });
+  if (!candidate || candidate.hiredMemberId) return candidate; // вже найнято — не дублюємо
+  const nameParts = candidate.name.trim().split(/\s+/);
+  const member = await prisma.member.create({
+    data: {
+      companyId: candidate.companyId,
+      firstName: nameParts[0] || candidate.name,
+      lastName: nameParts.slice(1).join(' ') || null,
+      telegramUsername: candidate.telegramUsername,
+      email: candidate.email,
+      posts: candidate.vacancy.postUnitId ? { create: [{ postUnitId: candidate.vacancy.postUnitId }] } : undefined,
+    },
+  });
+  if (candidate.vacancy.postUnitId) {
+    await prisma.orgUnit.update({ where: { id: candidate.vacancy.postUnitId }, data: { isVacant: false } });
+  }
+  await prisma.vacancy.update({ where: { id: candidate.vacancyId }, data: { status: 'CLOSED' } });
+  const updated = await prisma.candidate.update({ where: { id: candidateId }, data: { stage: 'HIRED', hiredMemberId: member.id } });
+  await logChange(candidate.companyId, 'structure', 'create', `Найнято «${candidate.name}» на «${candidate.vacancy.title}»`, author);
+  return updated;
+}
+
+api.patch('/candidates/:id', async (req, res) => {
+  try {
+    const { stage, notes, name, telegramUsername, email, phone } = req.body ?? {};
+    await prisma.candidate.update({
+      where: { id: req.params.id },
+      data: {
+        ...(stage !== undefined && stage !== 'HIRED' && { stage }),
+        ...(notes !== undefined && { notes: notes || null }),
+        ...(name !== undefined && { name }),
+        ...(telegramUsername !== undefined && { telegramUsername: telegramUsername || null }),
+        ...(email !== undefined && { email: email || null }),
+        ...(phone !== undefined && { phone: phone || null }),
+      },
+    });
+    const candidate = stage === 'HIRED' ? await hireCandidate(req.params.id, req.body?.author) : await prisma.candidate.findUnique({ where: { id: req.params.id } });
+    res.json({ candidate });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+api.delete('/candidates/:id', async (req, res) => {
+  try {
+    await prisma.candidate.delete({ where: { id: req.params.id } });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
 // ── Журнал змін + технічні логи ───────────────────────────
 api.get('/companies/:id/changes', async (req, res) => {
   try {

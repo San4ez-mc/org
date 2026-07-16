@@ -173,3 +173,44 @@ export async function getInstructions(companyId: string): Promise<DriveNode[]> {
   const { tree } = await api<{ tree: DriveNode[] }>(`/companies/${companyId}/instructions`);
   return tree;
 }
+
+export type CandidateStage = 'NEW' | 'SCREENING' | 'INTERVIEW' | 'OFFER' | 'HIRED' | 'REJECTED';
+export type VacancyStatus = 'OPEN' | 'ON_HOLD' | 'CLOSED';
+
+export interface Candidate {
+  id: string;
+  vacancyId: string;
+  name: string;
+  telegramUsername: string | null;
+  email: string | null;
+  phone: string | null;
+  stage: CandidateStage;
+  notes: string | null;
+  hiredMemberId: string | null;
+  createdAt: string;
+}
+
+export interface Vacancy {
+  id: string;
+  title: string;
+  description: string | null;
+  status: VacancyStatus;
+  postUnitId: string | null;
+  postUnit: { id: string; name: string } | null;
+  candidates: Candidate[];
+  createdAt: string;
+}
+
+export async function getVacancies(companyId: string): Promise<Vacancy[]> {
+  const { vacancies } = await api<{ vacancies: Vacancy[] }>(`/companies/${companyId}/vacancies`);
+  return vacancies;
+}
+
+export async function getVacancy(vacancyId: string): Promise<Vacancy | null> {
+  try {
+    const { vacancy } = await api<{ vacancy: Vacancy }>(`/vacancies/${vacancyId}`);
+    return vacancy;
+  } catch {
+    return null;
+  }
+}

@@ -44,6 +44,21 @@ enum ProposalStatus {
   REJECTED
 }
 
+enum VacancyStatus {
+  OPEN
+  ON_HOLD
+  CLOSED // закрита (найнято або скасована)
+}
+
+enum CandidateStage {
+  NEW // новий
+  SCREENING // скринінг
+  INTERVIEW // співбесіда
+  OFFER // оффер
+  HIRED // найнято
+  REJECTED // відмова
+}
+
 // ── Компанія (тенант) ─────────────────────────────────────
 model Company {
   id                String   @id @default(uuid())
@@ -71,6 +86,8 @@ model Company {
   embeddings   InstructionEmbedding[]
   changes      ChangeLog[]
   statistics   Statistic[]
+  vacancies    Vacancy[]
+  candidates   Candidate[]
 }
 
 // ── Оргсхема (джерело зв'язків; Google Sheet — дзеркало) ───
@@ -99,6 +116,7 @@ model OrgUnit {
   ownedProcess Process[]     @relation("ProcessOwner")
   driveFolder  DriveFolder?
   statistics   Statistic[]
+  vacancies    Vacancy[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -341,4 +359,45 @@ model Proposal {
 
   @@index([companyId, status])
   @@index([targetInstructionId])
+}
+
+// ── Рекрутинг-воронка: вакансія → кандидати → найм ────────
+model Vacancy {
+  id          String        @id @default(uuid())
+  companyId   String
+  company     Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  postUnitId  String? // якщо вакансія під конкретну вакантну посаду в структурі
+  postUnit    OrgUnit?      @relation(fields: [postUnitId], references: [id])
+  title       String
+  description String? // текст оголошення (може згенерувати ШІ)
+  status      VacancyStatus @default(OPEN)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  candidates Candidate[]
+
+  @@index([companyId])
+  @@index([postUnitId])
+}
+
+model Candidate {
+  id                String         @id @default(uuid())
+  companyId         String
+  company           Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  vacancyId         String
+  vacancy           Vacancy        @relation(fields: [vacancyId], references: [id], onDelete: Cascade)
+  name              String
+  telegramUsername  String?
+  email             String?
+  phone             String?
+  stage             CandidateStage @default(NEW)
+  notes             String?
+  hiredMemberId     String? // Member, створений при переведенні в стадію HIRED (запускає онбординг)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([companyId])
+  @@index([vacancyId])
 }

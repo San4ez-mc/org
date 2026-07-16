@@ -101,3 +101,44 @@ export async function deleteStatistic(companyId: string, statisticId: string) {
   await call(`/statistics/${statisticId}`, 'DELETE', { author: 'пульт' });
   revalidatePath(`/company/${companyId}/stats`);
 }
+
+// ── Рекрутинг-воронка ──────────────────────────────────────
+export async function addVacancy(companyId: string, data: { title: string; postUnitId?: string; description?: string }) {
+  await call(`/companies/${companyId}/vacancies`, 'POST', { ...data, author: 'пульт' });
+  revalidatePath(`/company/${companyId}/vacancies`);
+}
+
+export async function updateVacancy(companyId: string, vacancyId: string, data: { title?: string; description?: string; status?: string }) {
+  await call(`/vacancies/${vacancyId}`, 'PATCH', { ...data, author: 'пульт' });
+  revalidatePath(`/company/${companyId}/vacancies`);
+  revalidatePath(`/company/${companyId}/vacancies/${vacancyId}`);
+}
+
+export async function deleteVacancy(companyId: string, vacancyId: string) {
+  await call(`/vacancies/${vacancyId}`, 'DELETE', { author: 'пульт' });
+  revalidatePath(`/company/${companyId}/vacancies`);
+}
+
+export async function addCandidate(companyId: string, vacancyId: string, data: { name: string; telegramUsername?: string; email?: string; phone?: string }) {
+  await call(`/vacancies/${vacancyId}/candidates`, 'POST', { ...data, author: 'пульт' });
+  revalidatePath(`/company/${companyId}/vacancies/${vacancyId}`);
+  revalidatePath(`/company/${companyId}/vacancies`);
+}
+
+export async function updateCandidate(
+  companyId: string,
+  vacancyId: string,
+  candidateId: string,
+  data: { stage?: string; notes?: string; name?: string; telegramUsername?: string; email?: string; phone?: string },
+) {
+  await call(`/candidates/${candidateId}`, 'PATCH', { ...data, author: 'пульт' });
+  revalidatePath(`/company/${companyId}/vacancies/${vacancyId}`);
+  revalidatePath(`/company/${companyId}/vacancies`);
+  revalidatePath(`/company/${companyId}`);
+  revalidatePath(`/company/${companyId}/structure`);
+}
+
+export async function deleteCandidate(companyId: string, vacancyId: string, candidateId: string) {
+  await call(`/candidates/${candidateId}`, 'DELETE');
+  revalidatePath(`/company/${companyId}/vacancies/${vacancyId}`);
+}
