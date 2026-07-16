@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { randomBytes } from 'crypto';
 import { prisma } from '@platform/db';
-import { findFolderByName, listFolderTree } from '@platform/drive';
+import { findFolderByName, listFolderTree, type DriveNode } from '@platform/drive';
 import { stepsToMermaid } from '@platform/ai';
 import { requireApiSecret } from '../middleware/auth';
 import { handleAct } from '../services/agent';
@@ -275,17 +275,67 @@ api.delete('/org-units/:id', async (req, res) => {
   }
 });
 
+// Дерево посадових інструкцій з Drive (Побудова → Посадові інструкції) — джерело правди,
+// БД-таблиця Instruction ще не наповнюється жодним потоком.
+async function instructionsTree(companyId: string): Promise<DriveNode[]> {
+  const company = await prisma.company.findUnique({ where: { id: companyId }, select: { driveRootFolderId: true } });
+  if (!company?.driveRootFolderId) return [];
+  const pobudova = await findFolderByName(company.driveRootFolderId, '1. Відділення побудови');
+  if (!pobudova) return [];
+  const instr = await findFolderByName(pobudova, 'Посадові інструкції');
+  if (!instr) return [];
+  return listFolderTree(instr);
+}
+
 // ── Дерево посадових інструкцій (з Drive: Побудова → Посадові інструкції) ──
 api.get('/companies/:id/instructions', async (req, res) => {
   try {
-    const company = await prisma.company.findUnique({ where: { id: req.params.id }, select: { driveRootFolderId: true } });
-    if (!company?.driveRootFolderId) return void res.json({ tree: [], reason: 'no-drive' });
-    const pobudova = await findFolderByName(company.driveRootFolderId, '1. Відділення побудови');
-    if (!pobudova) return void res.json({ tree: [], reason: 'no-pobudova' });
-    const instr = await findFolderByName(pobudova, 'Посадові інструкції');
-    if (!instr) return void res.json({ tree: [], reason: 'no-instructions-folder' });
-    const tree = await listFolderTree(instr);
+    const tree = await instructionsTree(req.params.id);
     res.json({ tree });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+// Знайти вузли дерева Drive, чия назва містить запит (рекурсивно, файли й теки).
+function matchDriveNodes(nodes: DriveNode[], q: string, path: string[] = []): { id: string; name: string; path: string[]; isFolder: boolean; webViewLink?: string }[] {
+  const out: { id: string; name: string; path: string[]; isFolder: boolean; webViewLink?: string }[] = [];
+  for (const n of nodes) {
+    if (n.name.toLowerCase().includes(q)) out.push({ id: n.id, name: n.name, path, isFolder: n.isFolder, webViewLink: n.webViewLink });
+    if (n.children?.length) out.push(...matchDriveNodes(n.children, q, [...path, n.name]));
+  }
+  return out;
+}
+
+// ── Глобальний пошук по компанії (люди / посади / процеси / інструкції) ──
+api.get('/companies/:id/search', async (req, res) => {
+  try {
+    const companyId = req.params.id;
+    const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
+    if (q.length < 2) return void res.json({ query: q, members: [], orgUnits: [], processes: [], instructions: [] });
+
+    const ci = { contains: q, mode: 'insensitive' as const };
+    const [members, orgUnits, processes, tree] = await Promise.all([
+      prisma.member.findMany({
+        where: { companyId, OR: [{ firstName: ci }, { lastName: ci }, { telegramUsername: ci }, { email: ci }] },
+        select: { id: true, firstName: true, lastName: true, telegramUsername: true, email: true },
+        take: 30,
+      }),
+      prisma.orgUnit.findMany({
+        where: { companyId, OR: [{ name: ci }, { ckp: ci }] },
+        select: { id: true, name: true, type: true, ckp: true, holderName: true },
+        take: 30,
+      }),
+      prisma.process.findMany({
+        where: { companyId, OR: [{ name: ci }, { description: ci }] },
+        select: { id: true, name: true, description: true },
+        take: 30,
+      }),
+      instructionsTree(companyId).catch(() => [] as DriveNode[]),
+    ]);
+    const instructions = matchDriveNodes(tree, q.toLowerCase()).slice(0, 30);
+
+    res.json({ query: q, members, orgUnits, processes, instructions });
   } catch (err) {
     res.status(500).json({ error: String(err) });
   }

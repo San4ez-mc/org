@@ -173,3 +173,15 @@ export async function getInstructions(companyId: string): Promise<DriveNode[]> {
   const { tree } = await api<{ tree: DriveNode[] }>(`/companies/${companyId}/instructions`);
   return tree;
 }
+
+export interface SearchResults {
+  query: string;
+  members: { id: string; firstName: string; lastName: string | null; telegramUsername: string | null; email: string | null }[];
+  orgUnits: { id: string; name: string; type: string; ckp: string | null; holderName: string | null }[];
+  processes: { id: string; name: string; description: string | null }[];
+  instructions: { id: string; name: string; path: string[]; isFolder: boolean; webViewLink?: string }[];
+}
+
+export async function search(companyId: string, q: string): Promise<SearchResults> {
+  return api<SearchResults>(`/companies/${companyId}/search?q=${encodeURIComponent(q)}`);
+}
