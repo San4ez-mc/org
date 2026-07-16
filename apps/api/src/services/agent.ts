@@ -12,6 +12,7 @@ import {
 } from '@platform/ai';
 import { CANONICAL_DIVISIONS } from '@platform/org-template';
 import { knowledgeContextFor } from './knowledge';
+import { trialFieldsForNewCompany } from './billing';
 
 export interface AgentIntent {
   action: string;
@@ -117,7 +118,7 @@ async function buildAndNotify(answers: OnboardingAnswers, ctx: AgentContext, roo
   // Персист у БД: компанія + відділення + тейлоровані посади
   try {
     const company = await prisma.company.create({
-      data: { name, driveRootFolderId: built.companyFolderId, orgSheetId: built.orgSheetId },
+      data: { name, driveRootFolderId: built.companyFolderId, orgSheetId: built.orgSheetId, ...trialFieldsForNewCompany() },
       select: { id: true },
     });
     for (const div of CANONICAL_DIVISIONS) {

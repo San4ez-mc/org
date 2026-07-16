@@ -53,10 +53,11 @@ model Company {
   orgSheetId        String? // Google Sheet з оргсхемою
   googleAccountId   String? // прив'язаний OAuth Google-акаунт (для Drive/Sheets/Docs)
 
-  // Слоти під Фазу 3 (білінг) — поки не використовуються
-  subscriptionPlan   String?
-  subscriptionStatus String?
-  trialEndsAt        DateTime?
+  // Фаза 3 — Комерція: підписка/білінг
+  subscriptionPlan     String? // код тарифу з каталогу apps/api/src/config/plans.ts ("start"/"standard"/"business")
+  subscriptionStatus   String? // "trial" | "active" | "canceled" — активність виставляється вручну після оплати (mark-paid)
+  trialEndsAt          DateTime?
+  subscriptionRenewsAt DateTime? // до якої дати чинна остання оплата
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -71,6 +72,30 @@ model Company {
   embeddings   InstructionEmbedding[]
   changes      ChangeLog[]
   statistics   Statistic[]
+  invoices     Invoice[]
+}
+
+enum InvoiceStatus {
+  PENDING
+  PAID
+  CANCELED
+}
+
+// ── Рахунок за тариф (ручний білінг, поки без платіжного шлюзу) ─
+model Invoice {
+  id        String        @id @default(uuid())
+  companyId String
+  company   Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  plan      String // код тарифу на момент виставлення рахунку
+  amount    Int // сума в гривнях (цілі)
+  currency  String        @default("UAH")
+  status    InvoiceStatus @default(PENDING)
+  note      String?
+
+  createdAt DateTime  @default(now())
+  paidAt    DateTime?
+
+  @@index([companyId])
 }
 
 // ── Оргсхема (джерело зв'язків; Google Sheet — дзеркало) ───

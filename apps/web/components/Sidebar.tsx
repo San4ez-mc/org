@@ -13,6 +13,7 @@ export default function Sidebar() {
     { icon: '📈', label: 'Статистики', href: companyId ? `/company/${companyId}/stats` : '/', active: path.endsWith('/stats'), disabled: !companyId },
     { icon: '📄', label: 'Інструкції', href: companyId ? `/company/${companyId}/instructions` : '/', active: path.endsWith('/instructions'), disabled: !companyId },
     { icon: '📓', label: 'Журнал', href: companyId ? `/company/${companyId}/journal` : '/', active: path.endsWith('/journal'), disabled: !companyId },
+    { icon: '💳', label: 'Білінг', href: companyId ? `/company/${companyId}/billing` : '/', active: path.endsWith('/billing'), disabled: !companyId },
     { icon: '🩺', label: 'Логи', href: '/logs', active: path === '/logs' },
   ];
 

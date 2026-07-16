@@ -35,6 +35,28 @@ export async function generateAccessToken(memberId: string): Promise<string> {
   return token as string;
 }
 
+export async function createInvoice(companyId: string, data: { planCode: string; amount?: number; note?: string }) {
+  await call(`/companies/${companyId}/billing/invoices`, 'POST', data);
+  revalidatePath(`/company/${companyId}/billing`);
+}
+
+export async function markInvoicePaid(companyId: string, invoiceId: string) {
+  await call(`/billing/invoices/${invoiceId}/mark-paid`, 'POST');
+  revalidatePath(`/company/${companyId}/billing`);
+  revalidatePath('/');
+}
+
+export async function cancelInvoice(companyId: string, invoiceId: string) {
+  await call(`/billing/invoices/${invoiceId}/cancel`, 'POST');
+  revalidatePath(`/company/${companyId}/billing`);
+}
+
+export async function updateBilling(companyId: string, data: { plan?: string; status?: string; trialEndsAt?: string | null; subscriptionRenewsAt?: string | null }) {
+  await call(`/companies/${companyId}/billing`, 'PATCH', data);
+  revalidatePath(`/company/${companyId}/billing`);
+  revalidatePath('/');
+}
+
 export async function assignPost(companyId: string, memberId: string, postUnitId: string) {
   await call(`/members/${memberId}/posts`, 'POST', { postUnitId });
   revalidatePath(`/company/${companyId}`);

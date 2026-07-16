@@ -2,6 +2,9 @@ import { getCompanies } from '@/lib/api';
 
 export const dynamic = 'force-dynamic';
 
+const STATE_LABEL: Record<string, string> = { trial: 'тріал', active: 'активна', past_due: 'прострочено', expired: 'не активна' };
+const STATE_COLOR: Record<string, string> = { trial: '#e5c76b', active: '#6bbf72', past_due: '#e08a4f', expired: '#e05c5c' };
+
 export default async function CompaniesPage() {
   let companies;
   try {
@@ -31,7 +34,14 @@ export default async function CompaniesPage() {
               color: 'inherit',
             }}
           >
-            <div style={{ fontWeight: 600 }}>{c.name}</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <div style={{ fontWeight: 600 }}>{c.name}</div>
+              {c.billing && (
+                <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 6, background: 'hsl(var(--muted))', color: STATE_COLOR[c.billing.state] }}>
+                  {STATE_LABEL[c.billing.state]}
+                </span>
+              )}
+            </div>
             <div style={{ fontSize: 12, color: 'hsl(var(--muted-foreground))', marginTop: 4 }}>
               створено {new Date(c.createdAt).toLocaleDateString('uk-UA')}
             </div>

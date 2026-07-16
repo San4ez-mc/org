@@ -5,6 +5,8 @@ import { findFolderByName, listFolderTree } from '@platform/drive';
 import { stepsToMermaid } from '@platform/ai';
 import { requireApiSecret } from '../middleware/auth';
 import { handleAct } from '../services/agent';
+import { computeBillingState, getBillingSummary, canAddMember } from '../services/billing';
+import { PLANS, getPlan } from '../config/plans';
 
 /**
  * Контракт API платформи (§8 PLAN_PHASE1.md).
@@ -55,9 +57,25 @@ api.get('/companies', async (_req, res) => {
   try {
     const companies = await prisma.company.findMany({
       orderBy: { createdAt: 'desc' },
-      select: { id: true, name: true, abbr: true, driveRootFolderId: true, orgSheetId: true, createdAt: true },
+      select: {
+        id: true,
+        name: true,
+        abbr: true,
+        driveRootFolderId: true,
+        orgSheetId: true,
+        createdAt: true,
+        subscriptionPlan: true,
+        subscriptionStatus: true,
+        trialEndsAt: true,
+        subscriptionRenewsAt: true,
+      },
     });
-    res.json({ companies });
+    res.json({
+      companies: companies.map(({ subscriptionStatus, subscriptionRenewsAt, trialEndsAt, subscriptionPlan, ...c }) => ({
+        ...c,
+        billing: { state: computeBillingState({ subscriptionPlan, subscriptionStatus, trialEndsAt, subscriptionRenewsAt }), trialEndsAt },
+      })),
+    });
   } catch (err) {
     res.status(500).json({ error: String(err) });
   }
@@ -89,6 +107,8 @@ api.post('/companies/:id/members', async (req, res) => {
   try {
     const { firstName, lastName, telegramUserId, telegramUsername, email, birthDate, role, postUnitIds } = req.body ?? {};
     if (!firstName) return void res.status(400).json({ error: 'firstName обовʼязковий' });
+    const allowed = await canAddMember(req.params.id);
+    if (!allowed.ok) return void res.status(402).json({ error: allowed.reason });
     const member = await prisma.member.create({
       data: {
         companyId: req.params.id,
@@ -163,6 +183,89 @@ api.delete('/members/:id/posts/:postUnitId', async (req, res) => {
   try {
     await prisma.memberPost.deleteMany({ where: { memberId: req.params.id, postUnitId: req.params.postUnitId } });
     res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+// ── Комерція: підписка/білінг (Ф3) ─────────────────────────
+// Оплата поки без платіжного шлюзу — рахунок виставляється вручну, адмін позначає "оплачено".
+api.get('/companies/:id/billing', async (req, res) => {
+  try {
+    const summary = await getBillingSummary(req.params.id);
+    if (!summary) return void res.status(404).json({ error: 'Компанію не знайдено' });
+    res.json({ billing: summary });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+// Ручне коригування підписки (продовжити тріал, підключити безкоштовно тощо)
+api.patch('/companies/:id/billing', async (req, res) => {
+  try {
+    const { plan, status, trialEndsAt, subscriptionRenewsAt } = req.body ?? {};
+    await prisma.company.update({
+      where: { id: req.params.id },
+      data: {
+        ...(plan !== undefined && { subscriptionPlan: plan }),
+        ...(status !== undefined && { subscriptionStatus: status }),
+        ...(trialEndsAt !== undefined && { trialEndsAt: trialEndsAt ? new Date(trialEndsAt) : null }),
+        ...(subscriptionRenewsAt !== undefined && { subscriptionRenewsAt: subscriptionRenewsAt ? new Date(subscriptionRenewsAt) : null }),
+      },
+    });
+    await logChange(req.params.id, 'billing', 'update', 'Підписку скориговано вручну', req.body?.author);
+    res.json({ billing: await getBillingSummary(req.params.id) });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+// Виставити рахунок за тариф (ручний білінг)
+api.post('/companies/:id/billing/invoices', async (req, res) => {
+  try {
+    const { planCode, amount, note } = req.body ?? {};
+    const plan = PLANS.find((p) => p.code === planCode);
+    if (!plan) return void res.status(400).json({ error: 'Невідомий код тарифу' });
+    const invoice = await prisma.invoice.create({
+      data: { companyId: req.params.id, plan: plan.code, amount: Number.isFinite(amount) ? amount : plan.priceUAH, note: note || null },
+    });
+    await logChange(req.params.id, 'billing', 'create', `Рахунок на тариф «${plan.name}» — ${invoice.amount} грн`, req.body?.author);
+    res.json({ invoice });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+// Позначити рахунок оплаченим → активує підписку на місяць від сьогодні (або продовжує чинну)
+api.post('/billing/invoices/:invoiceId/mark-paid', async (req, res) => {
+  try {
+    const invoice = await prisma.invoice.findUnique({ where: { id: req.params.invoiceId } });
+    if (!invoice) return void res.status(404).json({ error: 'Рахунок не знайдено' });
+    if (invoice.status === 'PAID') return void res.json({ invoice });
+
+    const company = await prisma.company.findUnique({ where: { id: invoice.companyId }, select: { subscriptionRenewsAt: true } });
+    const now = new Date();
+    const base = company?.subscriptionRenewsAt && company.subscriptionRenewsAt > now ? company.subscriptionRenewsAt : now;
+    const renewsAt = new Date(base.getTime() + 30 * 24 * 60 * 60 * 1000);
+
+    const [paid] = await prisma.$transaction([
+      prisma.invoice.update({ where: { id: invoice.id }, data: { status: 'PAID', paidAt: now } }),
+      prisma.company.update({
+        where: { id: invoice.companyId },
+        data: { subscriptionPlan: invoice.plan, subscriptionStatus: 'active', subscriptionRenewsAt: renewsAt },
+      }),
+    ]);
+    await logChange(invoice.companyId, 'billing', 'update', `Оплату підтверджено — тариф «${getPlan(invoice.plan).name}» до ${renewsAt.toLocaleDateString('uk-UA')}`, req.body?.author);
+    res.json({ invoice: paid });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+api.post('/billing/invoices/:invoiceId/cancel', async (req, res) => {
+  try {
+    const invoice = await prisma.invoice.update({ where: { id: req.params.invoiceId }, data: { status: 'CANCELED' } });
+    res.json({ invoice });
   } catch (err) {
     res.status(500).json({ error: String(err) });
   }

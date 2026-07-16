@@ -9,6 +9,7 @@ export interface Company {
   driveRootFolderId: string | null;
   orgSheetId: string | null;
   createdAt: string;
+  billing?: { state: BillingState; trialEndsAt: string | null };
 }
 
 export interface OrgUnit {
@@ -172,4 +173,45 @@ export interface DriveNode {
 export async function getInstructions(companyId: string): Promise<DriveNode[]> {
   const { tree } = await api<{ tree: DriveNode[] }>(`/companies/${companyId}/instructions`);
   return tree;
+}
+
+export type BillingState = 'trial' | 'active' | 'past_due' | 'expired';
+
+export interface PlanDef {
+  code: string;
+  name: string;
+  priceUAH: number;
+  memberLimit: number | null;
+  description: string;
+}
+
+export interface Invoice {
+  id: string;
+  companyId: string;
+  plan: string;
+  amount: number;
+  currency: string;
+  status: 'PENDING' | 'PAID' | 'CANCELED';
+  note: string | null;
+  createdAt: string;
+  paidAt: string | null;
+}
+
+export interface Billing {
+  plan: string;
+  planDef: PlanDef;
+  status: string | null;
+  state: BillingState;
+  legacy: boolean;
+  trialEndsAt: string | null;
+  subscriptionRenewsAt: string | null;
+  memberCount: number;
+  memberLimit: number | null;
+  plans: PlanDef[];
+  invoices: Invoice[];
+}
+
+export async function getBilling(companyId: string): Promise<Billing> {
+  const { billing } = await api<{ billing: Billing }>(`/companies/${companyId}/billing`);
+  return billing;
 }
