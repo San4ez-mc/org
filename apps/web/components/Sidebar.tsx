@@ -8,6 +8,7 @@ export default function Sidebar() {
 
   const items = [
     { icon: '🏢', label: 'Компанії', href: '/', active: path === '/' || (path.startsWith('/company/') && !path.endsWith('/structure') && !path.includes('/processes')) },
+    { icon: '🗃️', label: 'Портфель', href: '/portfolio', active: path === '/portfolio' },
     { icon: '🗂️', label: 'Орг.структура', href: companyId ? `/company/${companyId}/structure` : '/', active: path.endsWith('/structure'), disabled: !companyId },
     { icon: '⚙️', label: 'Процеси', href: companyId ? `/company/${companyId}/processes` : '/', active: path.includes('/processes'), disabled: !companyId },
     { icon: '📈', label: 'Статистики', href: companyId ? `/company/${companyId}/stats` : '/', active: path.endsWith('/stats'), disabled: !companyId },

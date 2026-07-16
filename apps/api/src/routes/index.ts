@@ -84,6 +84,147 @@ api.get('/companies/:id', async (req, res) => {
   }
 });
 
+// ── Портфель клієнтів (супер-адмін: порівняння + статуси впровадження) ──
+const IMPLEMENTATION_STAGES = ['onboarding', 'active', 'paused', 'churned'] as const;
+
+api.get('/portfolio', async (_req, res) => {
+  try {
+    const companies = await prisma.company.findMany({
+      orderBy: { createdAt: 'desc' },
+      select: {
+        id: true,
+        name: true,
+        abbr: true,
+        implementationStage: true,
+        createdAt: true,
+        _count: { select: { members: true, processes: true } },
+      },
+    });
+    const vacantByCompany = await prisma.orgUnit.groupBy({
+      by: ['companyId'],
+      where: { type: 'POST', isVacant: true, companyId: { in: companies.map((c) => c.id) } },
+      _count: { _all: true },
+    });
+    const postsByCompany = await prisma.orgUnit.groupBy({
+      by: ['companyId'],
+      where: { type: 'POST', companyId: { in: companies.map((c) => c.id) } },
+      _count: { _all: true },
+    });
+    const vacantMap = new Map(vacantByCompany.map((v) => [v.companyId, v._count._all]));
+    const postsMap = new Map(postsByCompany.map((v) => [v.companyId, v._count._all]));
+
+    res.json({
+      companies: companies.map((c) => ({
+        id: c.id,
+        name: c.name,
+        abbr: c.abbr,
+        implementationStage: c.implementationStage,
+        createdAt: c.createdAt,
+        members: c._count.members,
+        processes: c._count.processes,
+        posts: postsMap.get(c.id) ?? 0,
+        vacantPosts: vacantMap.get(c.id) ?? 0,
+      })),
+    });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+api.patch('/companies/:id', async (req, res) => {
+  try {
+    const { implementationStage } = req.body ?? {};
+    if (implementationStage !== undefined && !IMPLEMENTATION_STAGES.includes(implementationStage)) {
+      return void res.status(400).json({ error: `implementationStage має бути одним з: ${IMPLEMENTATION_STAGES.join(', ')}` });
+    }
+    const company = await prisma.company.update({
+      where: { id: req.params.id },
+      data: { ...(implementationStage !== undefined && { implementationStage }) },
+    });
+    if (implementationStage !== undefined) {
+      await logChange(company.id, 'structure', 'update', `Стадія впровадження: ${implementationStage}`, req.body?.author);
+    }
+    res.json({ company });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+// Ключ батька для зіставлення структур між компаніями (лише DIVISION/DEPARTMENT мають boardNo, і в різних діапазонах — тому зіставляємо за парою тип+номер).
+function parentMatchKey(type: string, boardNo: number | null): string | null {
+  return boardNo === null ? null : `${type}:${boardNo}`;
+}
+
+// Клонувати структуру (посади) і процеси іншого клієнта в цю компанію — консультанту
+// не треба будувати схожого клієнта з нуля. Ідемпотентно: пропускає дублікати за назвою.
+api.post('/companies/:id/clone-from', async (req, res) => {
+  try {
+    const targetId = req.params.id;
+    const sourceId = req.body?.sourceCompanyId;
+    if (!sourceId) return void res.status(400).json({ error: 'sourceCompanyId обовʼязковий' });
+    if (sourceId === targetId) return void res.status(400).json({ error: 'Джерело й ціль — одна й та сама компанія' });
+    const include = { structure: true, processes: true, ...(req.body?.include ?? {}) };
+    const author = req.body?.author;
+
+    const [sourceUnits, targetUnits] = await Promise.all([
+      prisma.orgUnit.findMany({ where: { companyId: sourceId } }),
+      prisma.orgUnit.findMany({ where: { companyId: targetId } }),
+    ]);
+    const sourceById = new Map(sourceUnits.map((u) => [u.id, u] as const));
+    const targetParentByKey = new Map(
+      targetUnits
+        .filter((u) => u.type === 'DIVISION' || u.type === 'DEPARTMENT')
+        .map((u) => [parentMatchKey(u.type, u.boardNo), u] as const)
+        .filter((e): e is [string, (typeof targetUnits)[number]] => e[0] !== null),
+    );
+    const existingPostNames = new Set(targetUnits.filter((u) => u.type === 'POST').map((u) => u.name.trim().toLowerCase()));
+
+    const created = { posts: 0, processes: 0 };
+    const skipped = { posts: 0, processes: 0 };
+
+    if (include.structure) {
+      for (const post of sourceUnits.filter((u) => u.type === 'POST')) {
+        const key = post.name.trim().toLowerCase();
+        if (existingPostNames.has(key)) { skipped.posts++; continue; }
+        const parent = post.parentId ? sourceById.get(post.parentId) : undefined;
+        const targetParent = parent ? targetParentByKey.get(parentMatchKey(parent.type, parent.boardNo) ?? '') : undefined;
+        if (!targetParent) { skipped.posts++; continue; }
+        await prisma.orgUnit.create({
+          data: { companyId: targetId, parentId: targetParent.id, type: 'POST', name: post.name, ckp: post.ckp, isVacant: true },
+        });
+        existingPostNames.add(key);
+        created.posts++;
+      }
+    }
+
+    if (include.processes) {
+      const [sourceProcesses, existingProcessNames] = await Promise.all([
+        prisma.process.findMany({ where: { companyId: sourceId } }),
+        prisma.process.findMany({ where: { companyId: targetId }, select: { name: true } }).then((rows) => new Set(rows.map((r) => r.name.trim().toLowerCase()))),
+      ]);
+      for (const pr of sourceProcesses) {
+        if (existingProcessNames.has(pr.name.trim().toLowerCase())) { skipped.processes++; continue; }
+        await prisma.process.create({
+          data: { companyId: targetId, name: pr.name, description: pr.description, steps: pr.steps ?? [], diagram: pr.diagram },
+        });
+        created.processes++;
+      }
+    }
+
+    const source = await prisma.company.findUnique({ where: { id: sourceId }, select: { name: true } });
+    await logChange(
+      targetId,
+      'structure',
+      'create',
+      `Склоновано з «${source?.name ?? sourceId}»: +${created.posts} посад, +${created.processes} процесів`,
+      author,
+    );
+    res.json({ created, skipped });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
 // ── Працівники (люди) ─────────────────────────────────────
 api.post('/companies/:id/members', async (req, res) => {
   try {

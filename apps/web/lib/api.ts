@@ -173,3 +173,22 @@ export async function getInstructions(companyId: string): Promise<DriveNode[]> {
   const { tree } = await api<{ tree: DriveNode[] }>(`/companies/${companyId}/instructions`);
   return tree;
 }
+
+export type ImplementationStage = 'onboarding' | 'active' | 'paused' | 'churned';
+
+export interface PortfolioCompany {
+  id: string;
+  name: string;
+  abbr: string | null;
+  implementationStage: ImplementationStage;
+  createdAt: string;
+  members: number;
+  processes: number;
+  posts: number;
+  vacantPosts: number;
+}
+
+export async function getPortfolio(): Promise<PortfolioCompany[]> {
+  const { companies } = await api<{ companies: PortfolioCompany[] }>('/portfolio');
+  return companies;
+}

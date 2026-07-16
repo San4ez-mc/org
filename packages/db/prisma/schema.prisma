@@ -58,6 +58,10 @@ model Company {
   subscriptionStatus String?
   trialEndsAt        DateTime?
 
+  // Портфель клієнтів (супер-адмін): стадія впровадження консультантом.
+  // "onboarding" | "active" | "paused" | "churned" — рядок, не enum, бо значення можуть змінюватись.
+  implementationStage String @default("onboarding")
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
