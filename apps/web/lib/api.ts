@@ -20,6 +20,7 @@ export interface OrgUnit {
   boardNo: number | null;
   holderName: string | null;
   isVacant: boolean;
+  salary: number | null;
 }
 
 export interface ProcessStep {
@@ -172,4 +173,37 @@ export interface DriveNode {
 export async function getInstructions(companyId: string): Promise<DriveNode[]> {
   const { tree } = await api<{ tree: DriveNode[] }>(`/companies/${companyId}/instructions`);
   return tree;
+}
+
+export interface PayrollSummary {
+  postsTotal: number;
+  postsFilled: number;
+  postsVacant: number;
+  postsWithoutSalary: number;
+  filledMonthly: number;
+  vacantMonthly: number;
+  totalMonthly: number;
+}
+
+export interface PayrollPost {
+  id: string;
+  name: string;
+  isVacant: boolean;
+  salary: number | null;
+}
+
+export interface PayrollDivision extends PayrollSummary {
+  id: string;
+  name: string;
+  boardNo: number | null;
+  posts: PayrollPost[];
+}
+
+export interface Payroll {
+  company: PayrollSummary;
+  divisions: PayrollDivision[];
+}
+
+export async function getPayroll(companyId: string): Promise<Payroll> {
+  return api<Payroll>(`/companies/${companyId}/payroll`);
 }

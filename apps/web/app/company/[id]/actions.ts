@@ -45,10 +45,11 @@ export async function unassignPost(companyId: string, memberId: string, postUnit
   revalidatePath(`/company/${companyId}`);
 }
 
-export async function updateOrgUnit(companyId: string, unitId: string, data: { name?: string; ckp?: string }) {
+export async function updateOrgUnit(companyId: string, unitId: string, data: { name?: string; ckp?: string; salary?: number | null }) {
   await call(`/org-units/${unitId}`, 'PATCH', data);
   revalidatePath(`/company/${companyId}`);
   revalidatePath(`/company/${companyId}/structure`);
+  revalidatePath(`/company/${companyId}/payroll`);
 }
 
 export async function addPost(companyId: string, parentId: string, name: string) {

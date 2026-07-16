@@ -93,6 +93,7 @@ model OrgUnit {
   reportsTo       OrgUnit?  @relation("PostReports", fields: [reportsToUnitId], references: [id])
   reportsFrom     OrgUnit[] @relation("PostReports")
   isVacant        Boolean   @default(false)
+  salary          Float? // ФОП: місячна вартість посади (грн), незалежно від заповненості — планування штату
 
   memberPosts  MemberPost[]
   instructions Instruction[]

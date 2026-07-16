@@ -238,12 +238,17 @@ api.get('/members/by-telegram/:tgId', async (req, res) => {
 // ── Редагування орг-одиниць ───────────────────────────────
 api.patch('/org-units/:id', async (req, res) => {
   try {
-    const { name, ckp } = req.body ?? {};
+    const { name, ckp, salary } = req.body ?? {};
     const unit = await prisma.orgUnit.update({
       where: { id: req.params.id },
-      data: { ...(name !== undefined && { name }), ...(ckp !== undefined && { ckp }) },
+      data: {
+        ...(name !== undefined && { name }),
+        ...(ckp !== undefined && { ckp }),
+        ...(salary !== undefined && { salary: salary === null || salary === '' ? null : Number(salary) }),
+      },
     });
-    await logChange(unit.companyId, 'structure', 'update', `Оновлено «${unit.name}»${ckp !== undefined ? ' (ЦКП)' : ''}`, req.body?.author);
+    const what = salary !== undefined ? ' (ФОП)' : ckp !== undefined ? ' (ЦКП)' : '';
+    await logChange(unit.companyId, 'structure', 'update', `Оновлено «${unit.name}»${what}`, req.body?.author);
     res.json({ unit });
   } catch (err) {
     res.status(500).json({ error: String(err) });
@@ -270,6 +275,61 @@ api.delete('/org-units/:id', async (req, res) => {
     await prisma.orgUnit.delete({ where: { id: req.params.id } });
     if (unit) await logChange(unit.companyId, 'structure', 'delete', `Видалено: ${unit.name}`, req.body?.author);
     res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+// ── Вартість оргструктури (ФОП по відділеннях, планування штату) ──
+api.get('/companies/:id/payroll', async (req, res) => {
+  try {
+    const units = await prisma.orgUnit.findMany({
+      where: { companyId: req.params.id },
+      select: { id: true, parentId: true, type: true, name: true, boardNo: true, isVacant: true, salary: true },
+    });
+    type UnitLite = (typeof units)[number];
+
+    const childrenByParent = new Map<string, UnitLite[]>();
+    for (const u of units) {
+      if (!u.parentId) continue;
+      const list = childrenByParent.get(u.parentId) ?? [];
+      list.push(u);
+      childrenByParent.set(u.parentId, list);
+    }
+
+    const collectPosts = (unitId: string, acc: UnitLite[]) => {
+      for (const child of childrenByParent.get(unitId) ?? []) {
+        if (child.type === 'POST') acc.push(child);
+        else collectPosts(child.id, acc);
+      }
+    };
+
+    const summarize = (posts: UnitLite[]) => {
+      const withSalary = posts.filter((p) => p.salary != null);
+      const filled = withSalary.filter((p) => !p.isVacant);
+      const vacant = withSalary.filter((p) => p.isVacant);
+      return {
+        postsTotal: posts.length,
+        postsFilled: posts.filter((p) => !p.isVacant).length,
+        postsVacant: posts.filter((p) => p.isVacant).length,
+        postsWithoutSalary: posts.length - withSalary.length,
+        filledMonthly: filled.reduce((s, p) => s + (p.salary ?? 0), 0),
+        vacantMonthly: vacant.reduce((s, p) => s + (p.salary ?? 0), 0),
+        totalMonthly: withSalary.reduce((s, p) => s + (p.salary ?? 0), 0),
+      };
+    };
+
+    const divisions = units
+      .filter((u) => u.type === 'DIVISION')
+      .sort((a, b) => (a.boardNo ?? 0) - (b.boardNo ?? 0))
+      .map((div) => {
+        const posts: UnitLite[] = [];
+        collectPosts(div.id, posts);
+        return { id: div.id, name: div.name, boardNo: div.boardNo, posts: posts.map((p) => ({ id: p.id, name: p.name, isVacant: p.isVacant, salary: p.salary })), ...summarize(posts) };
+      });
+
+    const allPosts = units.filter((u) => u.type === 'POST');
+    res.json({ company: summarize(allPosts), divisions });
   } catch (err) {
     res.status(500).json({ error: String(err) });
   }
