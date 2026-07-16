@@ -5,6 +5,7 @@ import { findFolderByName, listFolderTree } from '@platform/drive';
 import { stepsToMermaid } from '@platform/ai';
 import { requireApiSecret } from '../middleware/auth';
 import { handleAct } from '../services/agent';
+import { notifyCompany, notifyMember } from '../services/notifications';
 
 /**
  * Контракт API платформи (§8 PLAN_PHASE1.md).
@@ -15,12 +16,39 @@ export const api = Router();
 
 api.use(requireApiSecret);
 
-/** Записати зміну в журнал (не блокує основну дію). */
-async function logChange(companyId: string, entity: string, action: string, summary: string, author?: string) {
+/** Записати зміну в журнал і сповістити власників компанії (не блокує основну дію). */
+async function logChange(companyId: string, entity: string, action: string, summary: string, author?: string, notify = true) {
   try {
     await prisma.changeLog.create({ data: { companyId, entity, action, summary, author: author || 'пульт' } });
   } catch {
     /* ignore */
+  }
+  if (notify) {
+    notifyCompany({ companyId, kind: 'change', title: 'Зміна в компанії', body: `${summary}${author ? ` (${author})` : ''}` }).catch(() => {});
+  }
+}
+
+/** Перерахувати isVacant для посади за фактом призначень і сповістити, якщо посада щойно звільнилась. */
+async function syncVacancy(postUnitId: string, author?: string) {
+  try {
+    const unit = await prisma.orgUnit.findUnique({ where: { id: postUnitId }, select: { id: true, companyId: true, name: true, type: true, isVacant: true } });
+    if (!unit || unit.type !== 'POST') return;
+    const filled = await prisma.memberPost.count({ where: { postUnitId } });
+    const nowVacant = filled === 0;
+    if (nowVacant === unit.isVacant) return;
+    await prisma.orgUnit.update({ where: { id: postUnitId }, data: { isVacant: nowVacant } });
+    if (nowVacant) {
+      await logChange(unit.companyId, 'structure', 'update', `Посада звільнилась: «${unit.name}»`, author, false);
+      notifyCompany({
+        companyId: unit.companyId,
+        kind: 'vacancy',
+        title: 'Відкрилась вакансія',
+        body: `Посада «${unit.name}» більше не має призначеного працівника.`,
+      }).catch(() => {});
+    }
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.warn('[syncVacancy] помилка:', (err as Error).message);
   }
 }
 
@@ -134,9 +162,15 @@ api.patch('/members/:id', async (req, res) => {
 
 api.delete('/members/:id', async (req, res) => {
   try {
-    const m = await prisma.member.findUnique({ where: { id: req.params.id }, select: { companyId: true, firstName: true, lastName: true } });
+    const m = await prisma.member.findUnique({
+      where: { id: req.params.id },
+      select: { companyId: true, firstName: true, lastName: true, posts: { select: { postUnitId: true } } },
+    });
     await prisma.member.delete({ where: { id: req.params.id } });
-    if (m) await logChange(m.companyId, 'structure', 'delete', `Видалено працівника: ${m.firstName} ${m.lastName || ''}`.trim(), req.body?.author);
+    if (m) {
+      await logChange(m.companyId, 'structure', 'delete', `Видалено працівника: ${m.firstName} ${m.lastName || ''}`.trim(), req.body?.author);
+      for (const p of m.posts) await syncVacancy(p.postUnitId, req.body?.author);
+    }
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: String(err) });
@@ -153,6 +187,7 @@ api.post('/members/:id/posts', async (req, res) => {
       create: { memberId: req.params.id, postUnitId },
       update: {},
     });
+    await syncVacancy(postUnitId, req.body?.author);
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: String(err) });
@@ -162,6 +197,7 @@ api.post('/members/:id/posts', async (req, res) => {
 api.delete('/members/:id/posts/:postUnitId', async (req, res) => {
   try {
     await prisma.memberPost.deleteMany({ where: { memberId: req.params.id, postUnitId: req.params.postUnitId } });
+    await syncVacancy(req.params.postUnitId, req.body?.author);
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: String(err) });
@@ -255,7 +291,7 @@ api.post('/companies/:id/org-units', async (req, res) => {
     const { parentId, name, ckp, type } = req.body ?? {};
     if (!parentId || !name) return void res.status(400).json({ error: 'parentId і name обовʼязкові' });
     const unit = await prisma.orgUnit.create({
-      data: { companyId: req.params.id, parentId, name, ckp: ckp || null, type: type || 'POST' },
+      data: { companyId: req.params.id, parentId, name, ckp: ckp || null, type: type || 'POST', isVacant: (type || 'POST') === 'POST' },
     });
     await logChange(req.params.id, 'structure', 'create', `Додано ${type === 'DEPARTMENT' ? 'відділ' : 'посаду'}: ${name}`, req.body?.author);
     res.json({ unit });
@@ -440,9 +476,67 @@ api.post('/onboarding/answer', notImplemented('onboarding.answer'));
 
 // Інструкції та розповсюдження змін
 api.post('/instructions/:id/edit', notImplemented('instructions.edit'));
-api.get('/proposals', notImplemented('proposals.list'));
-api.post('/proposals/:id/approve', notImplemented('proposals.approve'));
-api.post('/proposals/:id/reject', notImplemented('proposals.reject'));
+
+// ── Пропозиції змін (затвердження) ────────────────────────
+api.get('/proposals', async (req, res) => {
+  try {
+    const companyId = typeof req.query.companyId === 'string' ? req.query.companyId : undefined;
+    const status = typeof req.query.status === 'string' ? req.query.status : undefined;
+    const proposals = await prisma.proposal.findMany({
+      where: { ...(companyId && { companyId }), ...(status && { status: status as any }) },
+      include: { targetInstruction: { select: { id: true, title: true } } },
+      orderBy: { createdAt: 'desc' },
+      take: 200,
+    });
+    res.json({ proposals });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+async function decideProposal(id: string, status: 'APPROVED' | 'REJECTED', approvedBy?: string) {
+  const proposal = await prisma.proposal.update({
+    where: { id },
+    data: { status, approvedBy: approvedBy || null, decidedAt: new Date() },
+    include: { targetInstruction: { select: { title: true } } },
+  });
+  const subject = proposal.targetInstruction?.title ? `«${proposal.targetInstruction.title}»` : 'пропозицію';
+  await logChange(
+    proposal.companyId,
+    'instruction',
+    'update',
+    `${status === 'APPROVED' ? 'Затверджено' : 'Відхилено'} ${subject}`,
+    approvedBy,
+    false,
+  );
+  if (proposal.createdBy) {
+    await notifyMember(
+      proposal.createdBy,
+      'approval',
+      status === 'APPROVED' ? 'Пропозицію затверджено' : 'Пропозицію відхилено',
+      `Вашу пропозицію щодо ${subject} ${status === 'APPROVED' ? 'затверджено' : 'відхилено'}.`,
+    );
+  }
+  return proposal;
+}
+
+api.post('/proposals/:id/approve', async (req, res) => {
+  try {
+    const proposal = await decideProposal(req.params.id, 'APPROVED', req.body?.approvedBy);
+    res.json({ proposal });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+api.post('/proposals/:id/reject', async (req, res) => {
+  try {
+    const proposal = await decideProposal(req.params.id, 'REJECTED', req.body?.approvedBy);
+    res.json({ proposal });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
 
 // Завантаження документів через бот
 api.post('/documents/ingest', notImplemented('documents.ingest'));
