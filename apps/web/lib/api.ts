@@ -156,6 +156,25 @@ export interface EventLog {
   createdAt: string;
 }
 
+export interface OrgHealthRef { id: string; name: string }
+export interface OrgHealth {
+  postsTotal: number;
+  postsWithoutCkp: OrgHealthRef[];
+  postsWithoutCkpCount: number;
+  vacantPosts: OrgHealthRef[];
+  vacantPostsCount: number;
+  processesTotal: number;
+  processesDescribed: number;
+  processesDescribedPct: number;
+  membersWithoutPost: OrgHealthRef[];
+  membersWithoutPostCount: number;
+}
+
+export async function getCompanyHealth(companyId: string): Promise<OrgHealth> {
+  const { health } = await api<{ health: OrgHealth }>(`/companies/${companyId}/health`);
+  return health;
+}
+
 export async function getLogs(): Promise<EventLog[]> {
   const { logs } = await api<{ logs: EventLog[] }>(`/logs`);
   return logs;

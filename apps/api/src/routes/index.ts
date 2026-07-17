@@ -435,6 +435,74 @@ api.get('/logs', async (req, res) => {
   }
 });
 
+// ── Діагностика «як є» (org-health аудит) ─────────────────
+// Посади без ЦКП, % описаних процесів, вакансії, люди без посади.
+api.get('/companies/:id/health', async (req, res) => {
+  try {
+    const companyId = req.params.id;
+    const company = await prisma.company.findUnique({ where: { id: companyId }, select: { id: true } });
+    if (!company) {
+      res.status(404).json({ error: 'Компанію не знайдено' });
+      return;
+    }
+
+    const [posts, processes, members] = await Promise.all([
+      prisma.orgUnit.findMany({
+        where: { companyId, type: 'POST' },
+        select: { id: true, name: true, ckp: true, isVacant: true, _count: { select: { memberPosts: true } } },
+        orderBy: [{ boardNo: 'asc' }, { orderNo: 'asc' }],
+      }),
+      prisma.process.findMany({
+        where: { companyId },
+        select: { id: true, name: true, steps: true, diagram: true, graph: true },
+        orderBy: { createdAt: 'asc' },
+      }),
+      prisma.member.findMany({
+        where: { companyId },
+        select: { id: true, firstName: true, lastName: true, _count: { select: { posts: true } } },
+        orderBy: { createdAt: 'asc' },
+      }),
+    ]);
+
+    const isBlank = (v: string | null) => v === null || v.trim() === '';
+
+    const postsWithoutCkp = posts.filter((p) => isBlank(p.ckp)).map((p) => ({ id: p.id, name: p.name }));
+    // Вакансія: явний прапорець isVacant або жодного призначеного працівника.
+    const vacantPosts = posts
+      .filter((p) => p.isVacant || p._count.memberPosts === 0)
+      .map((p) => ({ id: p.id, name: p.name }));
+
+    const processesDescribed = processes.filter((p) => {
+      const hasSteps = Array.isArray(p.steps) && (p.steps as unknown[]).length > 0;
+      const hasDiagram = typeof p.diagram === 'string' && p.diagram.trim() !== '';
+      const g = p.graph as { nodes?: unknown[] } | null;
+      const hasGraph = !!g && Array.isArray(g.nodes) && g.nodes.length > 0;
+      return hasSteps || hasDiagram || hasGraph;
+    }).length;
+
+    const membersWithoutPost = members
+      .filter((m) => m._count.posts === 0)
+      .map((m) => ({ id: m.id, name: `${m.firstName} ${m.lastName || ''}`.trim() }));
+
+    const processesTotal = processes.length;
+    const health = {
+      postsTotal: posts.length,
+      postsWithoutCkp,
+      postsWithoutCkpCount: postsWithoutCkp.length,
+      vacantPosts,
+      vacantPostsCount: vacantPosts.length,
+      processesTotal,
+      processesDescribed,
+      processesDescribedPct: processesTotal > 0 ? Math.round((processesDescribed / processesTotal) * 100) : 0,
+      membersWithoutPost,
+      membersWithoutPostCount: membersWithoutPost.length,
+    };
+    res.json({ health });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
 // Онбординг (legacy-контракт — залишено як заглушки)
 api.post('/onboarding/answer', notImplemented('onboarding.answer'));
 
