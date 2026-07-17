@@ -258,6 +258,10 @@ api.post('/companies/:id/org-units', async (req, res) => {
       data: { companyId: req.params.id, parentId, name, ckp: ckp || null, type: type || 'POST' },
     });
     await logChange(req.params.id, 'structure', 'create', `Додано ${type === 'DEPARTMENT' ? 'відділ' : 'посаду'}: ${name}`, req.body?.author);
+    // #279 синхронність: нова посада → пропозиція створити для неї чернетку інструкції.
+    if ((type || 'POST') === 'POST') {
+      await createProposal(req.params.id, 'NEW_DOC', { postUnitId: unit.id, title: `Посадова інструкція: ${name}`, reason: 'new_post_created' }, null, req.body?.author);
+    }
     res.json({ unit });
   } catch (err) {
     res.status(500).json({ error: String(err) });
@@ -440,9 +444,112 @@ api.post('/onboarding/answer', notImplemented('onboarding.answer'));
 
 // Інструкції та розповсюдження змін
 api.post('/instructions/:id/edit', notImplemented('instructions.edit'));
-api.get('/proposals', notImplemented('proposals.list'));
-api.post('/proposals/:id/approve', notImplemented('proposals.approve'));
-api.post('/proposals/:id/reject', notImplemented('proposals.reject'));
+// ── Пропозиції змін (#223) + движок синхронної побудови (#279) ──
+// Зміна однієї сутності (структура/процес/інструкція) → пропозиції правок повʼязаних.
+// Людина підтверджує (approve застосовує зміну) або відхиляє.
+async function createProposal(
+  companyId: string,
+  type: 'INSTRUCTION_EDIT' | 'NEW_DOC' | 'STRUCTURE_CHANGE',
+  payload: Record<string, unknown>,
+  targetInstructionId?: string | null,
+  createdBy?: string,
+) {
+  try {
+    return await prisma.proposal.create({
+      data: { companyId, type, payload: payload as object, targetInstructionId: targetInstructionId ?? null, createdBy: createdBy ?? null },
+    });
+  } catch {
+    return null;
+  }
+}
+
+api.get('/companies/:id/proposals', async (req, res) => {
+  try {
+    const status = typeof req.query.status === 'string' ? req.query.status.toUpperCase() : undefined;
+    const proposals = await prisma.proposal.findMany({
+      where: {
+        companyId: req.params.id,
+        ...(status && ['PENDING', 'APPROVED', 'REJECTED'].includes(status) ? { status: status as 'PENDING' | 'APPROVED' | 'REJECTED' } : {}),
+      },
+      include: { targetInstruction: { select: { id: true, title: true } } },
+      orderBy: { createdAt: 'desc' },
+      take: 200,
+    });
+    res.json({ proposals });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+api.post('/proposals/:id/approve', async (req, res) => {
+  try {
+    const p = await prisma.proposal.findUnique({ where: { id: req.params.id } });
+    if (!p) return void res.status(404).json({ error: 'Пропозицію не знайдено' });
+    if (p.status !== 'PENDING') return void res.status(409).json({ error: 'Пропозицію вже опрацьовано' });
+
+    // Застосувати зміну: NEW_DOC зі вказаною посадою → створити чернетку інструкції
+    let applied: { instructionId: string } | null = null;
+    if (p.type === 'NEW_DOC') {
+      const payload = (p.payload ?? {}) as { postUnitId?: string; title?: string };
+      if (payload.postUnitId) {
+        const instr = await prisma.instruction.create({
+          data: { companyId: p.companyId, postUnitId: payload.postUnitId, title: payload.title || 'Посадова інструкція', status: 'DRAFT' },
+        });
+        applied = { instructionId: instr.id };
+        await logChange(p.companyId, 'instruction', 'create', `Створено інструкцію (з пропозиції): ${instr.title}`, req.body?.author);
+      }
+    }
+
+    await prisma.proposal.update({
+      where: { id: p.id },
+      data: { status: 'APPROVED', approvedBy: req.body?.approvedBy ?? null, decidedAt: new Date() },
+    });
+    res.json({ ok: true, applied });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+api.post('/proposals/:id/reject', async (req, res) => {
+  try {
+    const p = await prisma.proposal.findUnique({ where: { id: req.params.id }, select: { id: true, status: true } });
+    if (!p) return void res.status(404).json({ error: 'Пропозицію не знайдено' });
+    if (p.status !== 'PENDING') return void res.status(409).json({ error: 'Пропозицію вже опрацьовано' });
+    await prisma.proposal.update({
+      where: { id: p.id },
+      data: { status: 'REJECTED', approvedBy: req.body?.approvedBy ?? null, decidedAt: new Date() },
+    });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+// Розповсюдження зміни інструкції → пропозиції-ревʼю для повʼязаних (основа #224).
+api.post('/instructions/:id/propagate', async (req, res) => {
+  try {
+    const instr = await prisma.instruction.findUnique({ where: { id: req.params.id }, select: { id: true, companyId: true, title: true } });
+    if (!instr) return void res.status(404).json({ error: 'Інструкцію не знайдено' });
+    const links = await prisma.instructionLink.findMany({
+      where: { instructionId: instr.id },
+      include: { related: { select: { id: true, title: true } } },
+    });
+    const created: { proposalId: string; relatedInstructionId: string; relatedTitle: string | undefined }[] = [];
+    for (const l of links) {
+      const prop = await createProposal(
+        instr.companyId,
+        'INSTRUCTION_EDIT',
+        { reason: 'linked_instruction_changed', sourceInstructionId: instr.id, sourceTitle: instr.title, relationType: l.relationType },
+        l.relatedInstructionId,
+        req.body?.author,
+      );
+      if (prop) created.push({ proposalId: prop.id, relatedInstructionId: l.relatedInstructionId, relatedTitle: l.related?.title });
+    }
+    res.json({ propagated: created.length, proposals: created });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
 
 // Завантаження документів через бот
 api.post('/documents/ingest', notImplemented('documents.ingest'));
