@@ -340,9 +340,63 @@ model ChangeLog {
   author     String? // хто зробив зміну (пізніше — memberId/роль)
   approvedBy String?
   approved   Boolean  @default(true) // поки авто; система затверджень — пізніше
+  unitId     String? // #220 звʼязок зміни з орг-одиницею (для історії версій)
   createdAt  DateTime @default(now())
 
   @@index([companyId])
+  @@index([unitId])
+}
+
+// #194 Бібліотека шаблонів (процеси/інструкції/структури для клонування)
+model Template {
+  id        String   @id @default(uuid())
+  companyId String
+  kind      String // process | instruction | structure
+  name      String
+  industry  String?
+  content   Json     @default("{}")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([companyId])
+}
+
+// #197 Кадрові накази / політики (окремо від посадових інструкцій)
+model Policy {
+  id            String    @id @default(uuid())
+  companyId     String
+  kind          String    @default("policy") // order | policy
+  title         String
+  body          String
+  effectiveDate DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([companyId])
+}
+
+// #212 Облік навчання й тестування
+model Training {
+  id            String   @id @default(uuid())
+  companyId     String
+  title         String
+  description   String?
+  instructionId String? // навчання з посадової інструкції
+  createdAt     DateTime @default(now())
+
+  @@index([companyId])
+}
+
+model TrainingResult {
+  id         String    @id @default(uuid())
+  trainingId String
+  memberId   String
+  score      Int?
+  passedAt   DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@unique([trainingId, memberId])
+  @@index([memberId])
 }
 
 // ── Технічні події/логи (боти, api, worker) ───────────────

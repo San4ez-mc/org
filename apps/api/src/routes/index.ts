@@ -16,9 +16,9 @@ export const api = Router();
 api.use(requireApiSecret);
 
 /** Записати зміну в журнал (не блокує основну дію). */
-async function logChange(companyId: string, entity: string, action: string, summary: string, author?: string) {
+async function logChange(companyId: string, entity: string, action: string, summary: string, author?: string, unitId?: string) {
   try {
-    await prisma.changeLog.create({ data: { companyId, entity, action, summary, author: author || 'пульт' } });
+    await prisma.changeLog.create({ data: { companyId, entity, action, summary, author: author || 'пульт', unitId: unitId ?? null } });
   } catch {
     /* ignore */
   }
@@ -275,6 +275,101 @@ api.get('/companies/:id/statistics-summary', async (req, res) => {
   }
 });
 
+// #194 Бібліотека шаблонів (процеси/інструкції/структури)
+api.get('/companies/:id/templates', async (req, res) => {
+  try {
+    const templates = await prisma.template.findMany({ where: { companyId: req.params.id }, orderBy: { createdAt: 'desc' } });
+    res.json({ templates });
+  } catch (err) { res.status(500).json({ error: String(err) }); }
+});
+api.post('/companies/:id/templates', async (req, res) => {
+  try {
+    const { kind, name, industry, content } = req.body ?? {};
+    if (!name) return void res.status(400).json({ error: 'name обовʼязковий' });
+    const template = await prisma.template.create({ data: { companyId: req.params.id, kind: kind || 'process', name, industry: industry || null, content: content ?? {} } });
+    res.json({ template });
+  } catch (err) { res.status(500).json({ error: String(err) }); }
+});
+api.delete('/templates/:id', async (req, res) => {
+  try { await prisma.template.delete({ where: { id: req.params.id } }); res.json({ ok: true }); } catch (err) { res.status(500).json({ error: String(err) }); }
+});
+
+// #197 Кадрові накази / політики
+api.get('/companies/:id/policies', async (req, res) => {
+  try {
+    const policies = await prisma.policy.findMany({ where: { companyId: req.params.id }, orderBy: { createdAt: 'desc' } });
+    res.json({ policies });
+  } catch (err) { res.status(500).json({ error: String(err) }); }
+});
+api.post('/companies/:id/policies', async (req, res) => {
+  try {
+    const { title, body, kind, effectiveDate } = req.body ?? {};
+    if (!title || !body) return void res.status(400).json({ error: 'title і body обовʼязкові' });
+    const policy = await prisma.policy.create({ data: { companyId: req.params.id, title, body, kind: kind === 'order' ? 'order' : 'policy', effectiveDate: effectiveDate ? new Date(effectiveDate) : null } });
+    res.json({ policy });
+  } catch (err) { res.status(500).json({ error: String(err) }); }
+});
+api.delete('/policies/:id', async (req, res) => {
+  try { await prisma.policy.delete({ where: { id: req.params.id } }); res.json({ ok: true }); } catch (err) { res.status(500).json({ error: String(err) }); }
+});
+
+// #220 Історія версій орг-одиниці (з журналу змін за unitId)
+api.get('/org-units/:id/history', async (req, res) => {
+  try {
+    const history = await prisma.changeLog.findMany({ where: { unitId: req.params.id }, orderBy: { createdAt: 'desc' }, take: 100, select: { id: true, action: true, summary: true, author: true, createdAt: true } });
+    res.json({ history });
+  } catch (err) { res.status(500).json({ error: String(err) }); }
+});
+
+// #212 Облік навчання й тестування
+api.get('/companies/:id/trainings', async (req, res) => {
+  try {
+    const trainings = await prisma.training.findMany({ where: { companyId: req.params.id }, orderBy: { createdAt: 'desc' } });
+    const results = await prisma.trainingResult.findMany({ where: { trainingId: { in: trainings.map((t) => t.id) } } });
+    res.json({ trainings, results });
+  } catch (err) { res.status(500).json({ error: String(err) }); }
+});
+api.post('/companies/:id/trainings', async (req, res) => {
+  try {
+    const { title, description, instructionId } = req.body ?? {};
+    if (!title) return void res.status(400).json({ error: 'title обовʼязковий' });
+    const training = await prisma.training.create({ data: { companyId: req.params.id, title, description: description || null, instructionId: instructionId || null } });
+    res.json({ training });
+  } catch (err) { res.status(500).json({ error: String(err) }); }
+});
+api.post('/trainings/:id/results', async (req, res) => {
+  try {
+    const { memberId, score, passed } = req.body ?? {};
+    if (!memberId) return void res.status(400).json({ error: 'memberId обовʼязковий' });
+    const result = await prisma.trainingResult.upsert({
+      where: { trainingId_memberId: { trainingId: req.params.id, memberId } },
+      create: { trainingId: req.params.id, memberId, score: score != null ? Number(score) : null, passedAt: passed ? new Date() : null },
+      update: { ...(score != null && { score: Number(score) }), passedAt: passed ? new Date() : null },
+    });
+    res.json({ result });
+  } catch (err) { res.status(500).json({ error: String(err) }); }
+});
+
+// #206 Онбординг працівника: інструкції посад + навчання, які треба пройти
+api.get('/members/:id/onboarding', async (req, res) => {
+  try {
+    const member = await prisma.member.findUnique({ where: { id: req.params.id }, select: { id: true, companyId: true, posts: { where: { removedAt: null }, select: { postUnitId: true } } } });
+    if (!member) return void res.status(404).json({ error: 'Працівника не знайдено' });
+    const postIds = member.posts.map((p) => p.postUnitId);
+    const [instructions, trainings, done] = await Promise.all([
+      prisma.instruction.findMany({ where: { companyId: member.companyId, postUnitId: { in: postIds } }, select: { id: true, title: true, driveDocId: true } }),
+      prisma.training.findMany({ where: { companyId: member.companyId }, select: { id: true, title: true, instructionId: true } }),
+      prisma.trainingResult.findMany({ where: { memberId: member.id }, select: { trainingId: true, passedAt: true } }),
+    ]);
+    const passedSet = new Set(done.filter((d) => d.passedAt).map((d) => d.trainingId));
+    res.json({
+      instructionsToRead: instructions,
+      trainings: trainings.map((t) => ({ id: t.id, title: t.title, instructionId: t.instructionId, passed: passedSet.has(t.id) })),
+      completed: trainings.length > 0 && trainings.every((t) => passedSet.has(t.id)),
+    });
+  } catch (err) { res.status(500).json({ error: String(err) }); }
+});
+
 // ── Працівники (люди) ─────────────────────────────────────
 api.post('/companies/:id/members', async (req, res) => {
   try {
@@ -478,7 +573,7 @@ api.patch('/org-units/:id', async (req, res) => {
         ...(unitStatus !== undefined && validStatus.includes(unitStatus) && { unitStatus }), // #217
       },
     });
-    await logChange(unit.companyId, 'structure', 'update', `Оновлено «${unit.name}»${ckp !== undefined ? ' (ЦКП)' : ''}`, req.body?.author);
+    await logChange(unit.companyId, 'structure', 'update', `Оновлено «${unit.name}»${ckp !== undefined ? ' (ЦКП)' : ''}`, req.body?.author, unit.id);
     res.json({ unit });
   } catch (err) {
     res.status(500).json({ error: String(err) });
@@ -492,7 +587,7 @@ api.post('/companies/:id/org-units', async (req, res) => {
     const unit = await prisma.orgUnit.create({
       data: { companyId: req.params.id, parentId, name, ckp: ckp || null, type: type || 'POST' },
     });
-    await logChange(req.params.id, 'structure', 'create', `Додано ${type === 'DEPARTMENT' ? 'відділ' : 'посаду'}: ${name}`, req.body?.author);
+    await logChange(req.params.id, 'structure', 'create', `Додано ${type === 'DEPARTMENT' ? 'відділ' : 'посаду'}: ${name}`, req.body?.author, unit.id);
     // #279 синхронність: нова посада → пропозиція створити для неї чернетку інструкції.
     if ((type || 'POST') === 'POST') {
       await createProposal(req.params.id, 'NEW_DOC', { postUnitId: unit.id, title: `Посадова інструкція: ${name}`, reason: 'new_post_created' }, null, req.body?.author);
@@ -507,7 +602,7 @@ api.delete('/org-units/:id', async (req, res) => {
   try {
     const unit = await prisma.orgUnit.findUnique({ where: { id: req.params.id }, select: { companyId: true, name: true } });
     await prisma.orgUnit.delete({ where: { id: req.params.id } });
-    if (unit) await logChange(unit.companyId, 'structure', 'delete', `Видалено: ${unit.name}`, req.body?.author);
+    if (unit) await logChange(unit.companyId, 'structure', 'delete', `Видалено: ${unit.name}`, req.body?.author, req.params.id);
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: String(err) });
