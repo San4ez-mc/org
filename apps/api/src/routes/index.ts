@@ -228,6 +228,53 @@ api.post('/org-units/:id/vacancy-draft', async (req, res) => {
   }
 });
 
+// #193 Глобальний пошук по всьому (люди / посади / процеси / інструкції)
+api.get('/companies/:id/search', async (req, res) => {
+  try {
+    const q = String(req.query.q || '').trim().toLowerCase();
+    if (q.length < 2) return void res.json({ query: q, results: { members: [], units: [], processes: [], instructions: [] } });
+    const companyId = req.params.id;
+    const [members, units, processes, instructions] = await Promise.all([
+      prisma.member.findMany({ where: { companyId }, select: { id: true, firstName: true, lastName: true, email: true } }),
+      prisma.orgUnit.findMany({ where: { companyId }, select: { id: true, name: true, ckp: true, type: true } }),
+      prisma.process.findMany({ where: { companyId }, select: { id: true, name: true, description: true } }),
+      prisma.instruction.findMany({ where: { companyId }, select: { id: true, title: true } }),
+    ]);
+    const inc = (s?: string | null) => !!s && s.toLowerCase().includes(q);
+    res.json({
+      query: q,
+      results: {
+        members: members.filter((m) => inc(`${m.firstName} ${m.lastName || ''}`) || inc(m.email)).slice(0, 20).map((m) => ({ id: m.id, name: `${m.firstName} ${m.lastName || ''}`.trim() })),
+        units: units.filter((u) => inc(u.name) || inc(u.ckp)).slice(0, 20).map((u) => ({ id: u.id, name: u.name, type: u.type })),
+        processes: processes.filter((p) => inc(p.name) || inc(p.description)).slice(0, 20).map((p) => ({ id: p.id, name: p.name })),
+        instructions: instructions.filter((i) => inc(i.title)).slice(0, 20).map((i) => ({ id: i.id, title: i.title })),
+      },
+    });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+// #230 Зведений дашборд трендів статистик
+api.get('/companies/:id/statistics-summary', async (req, res) => {
+  try {
+    const stats = await prisma.statistic.findMany({ where: { companyId: req.params.id }, include: { orgUnit: { select: { id: true, name: true } } } });
+    const summary = stats.map((s) => {
+      const points = Array.isArray(s.points) ? (s.points as { date?: string; value?: number }[]) : [];
+      const sorted = [...points].sort((a, b) => String(a.date).localeCompare(String(b.date)));
+      const last = sorted.length ? Number(sorted[sorted.length - 1].value) || 0 : 0;
+      const prev = sorted.length > 1 ? Number(sorted[sorted.length - 2].value) || 0 : 0;
+      const delta = last - prev;
+      const good = (delta > 0) === s.higherIsBetter;
+      const trend = delta === 0 ? 'flat' : good ? 'good' : 'bad';
+      return { id: s.id, name: s.name, unit: s.unit, orgUnit: s.orgUnit, last, prev, delta, trend, pointsCount: sorted.length };
+    });
+    res.json({ statistics: summary });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
 // ── Працівники (люди) ─────────────────────────────────────
 api.post('/companies/:id/members', async (req, res) => {
   try {
@@ -358,9 +405,11 @@ async function buildMemberSummary(member: MemberWithPosts) {
     include: { parent: { include: { parent: { include: { parent: true } } } } },
   });
   const postNames = units.map((u) => u.name);
-  const [company, statistics] = await Promise.all([
+  const [company, statistics, instructions] = await Promise.all([
     prisma.company.findUnique({ where: { id: member.companyId }, include: { processes: { orderBy: { createdAt: 'asc' } } } }),
     prisma.statistic.findMany({ where: { orgUnitId: { in: postUnitIds } }, include: { orgUnit: { select: { id: true, name: true, type: true } } } }),
+    // #225 інструкції посад працівника (зміст на Drive)
+    prisma.instruction.findMany({ where: { postUnitId: { in: postUnitIds } }, select: { id: true, title: true, driveDocId: true, folderPath: true, status: true, postUnitId: true } }),
   ]);
   const processes = (company?.processes ?? []).filter(
     (pr) => Array.isArray(pr.steps) && (pr.steps as { postTitle?: string }[]).some((s) => s?.postTitle && postNames.includes(s.postTitle)),
@@ -377,6 +426,7 @@ async function buildMemberSummary(member: MemberWithPosts) {
     posts: units.map((u) => ({ id: u.id, name: u.name, ckp: u.ckp, path: ancestors(u) })),
     processes: processes.map((pr) => ({ id: pr.id, name: pr.name, description: pr.description, steps: pr.steps })),
     statistics,
+    instructions: instructions.map((i) => ({ id: i.id, title: i.title, driveDocId: i.driveDocId, folderPath: i.folderPath, status: i.status })),
   };
 }
 
