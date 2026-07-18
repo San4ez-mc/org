@@ -322,6 +322,33 @@ api.patch('/processes/:id', async (req, res) => {
     if (graph !== undefined) data.graph = graph; // візуальна схема (React Flow)
     const process = await prisma.process.update({ where: { id: req.params.id }, data });
     await logChange(process.companyId, 'process', 'update', `Оновлено процес: ${process.name}`, req.body?.author);
+
+    // #279 синхронність: змінились кроки → пропозиції оновити інструкції відповідальних посад.
+    if (Array.isArray(steps)) {
+      const postTitles = [...new Set((steps as { postTitle?: string }[]).map((s) => (s?.postTitle || '').trim()).filter((t) => t !== ''))];
+      if (postTitles.length) {
+        const posts = await prisma.orgUnit.findMany({
+          where: { companyId: process.companyId, type: 'POST', name: { in: postTitles } },
+          select: { id: true },
+        });
+        const postIds = posts.map((p) => p.id);
+        if (postIds.length) {
+          const instructions = await prisma.instruction.findMany({
+            where: { companyId: process.companyId, postUnitId: { in: postIds } },
+            select: { id: true },
+          });
+          for (const instr of instructions) {
+            await createProposal(
+              process.companyId,
+              'INSTRUCTION_EDIT',
+              { reason: 'process_changed', processId: process.id, processName: process.name },
+              instr.id,
+              req.body?.author,
+            );
+          }
+        }
+      }
+    }
     res.json({ process });
   } catch (err) {
     res.status(500).json({ error: String(err) });
