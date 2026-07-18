@@ -180,6 +180,28 @@ export async function getLogs(): Promise<EventLog[]> {
   return logs;
 }
 
+export interface DashboardChange {
+  id: string;
+  entity: string;
+  action: string;
+  summary: string;
+  author: string | null;
+  createdAt: string;
+}
+export interface OwnerDashboard {
+  staffing: { postsTotal: number; filled: number; vacant: number; filledPct: number };
+  processes: { total: number; described: number; describedPct: number };
+  changes: { last7d: number; last30d: number };
+  pendingApprovals: number;
+  bottlenecks: { label: string; count: number }[];
+  recentChanges: DashboardChange[];
+}
+
+export async function getOwnerDashboard(companyId: string): Promise<OwnerDashboard> {
+  const { dashboard } = await api<{ dashboard: OwnerDashboard }>(`/companies/${companyId}/dashboard`);
+  return dashboard;
+}
+
 export interface DriveNode {
   id: string;
   name: string;

@@ -465,9 +465,7 @@ api.get('/companies/:id/health', async (req, res) => {
     ]);
 
     const isBlank = (v: string | null) => v === null || v.trim() === '';
-
     const postsWithoutCkp = posts.filter((p) => isBlank(p.ckp)).map((p) => ({ id: p.id, name: p.name }));
-    // Вакансія: явний прапорець isVacant або жодного призначеного працівника.
     const vacantPosts = posts
       .filter((p) => p.isVacant || p._count.memberPosts === 0)
       .map((p) => ({ id: p.id, name: p.name }));
@@ -498,6 +496,74 @@ api.get('/companies/:id/health', async (req, res) => {
       membersWithoutPostCount: membersWithoutPost.length,
     };
     res.json({ health });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+// ── Дашборд власника (health компанії) ────────────────────
+// Заповнено/вакантно, % опису процесів, зміни за період, що чекає
+// затвердження, вузькі місця.
+api.get('/companies/:id/dashboard', async (req, res) => {
+  try {
+    const companyId = req.params.id;
+    const company = await prisma.company.findUnique({ where: { id: companyId }, select: { id: true, name: true } });
+    if (!company) {
+      res.status(404).json({ error: 'Компанію не знайдено' });
+      return;
+    }
+
+    const now = Date.now();
+    const since7 = new Date(now - 7 * 86400000);
+    const since30 = new Date(now - 30 * 86400000);
+
+    const [posts, processes, members, changes7, changes30, pendingApprovals, recentChanges] = await Promise.all([
+      prisma.orgUnit.findMany({
+        where: { companyId, type: 'POST' },
+        select: { id: true, name: true, ckp: true, isVacant: true, _count: { select: { memberPosts: true } } },
+      }),
+      prisma.process.findMany({ where: { companyId }, select: { steps: true, diagram: true, graph: true } }),
+      prisma.member.findMany({ where: { companyId }, select: { _count: { select: { posts: true } } } }),
+      prisma.changeLog.count({ where: { companyId, createdAt: { gte: since7 } } }),
+      prisma.changeLog.count({ where: { companyId, createdAt: { gte: since30 } } }),
+      prisma.proposal.count({ where: { companyId, status: 'PENDING' } }),
+      prisma.changeLog.findMany({ where: { companyId }, orderBy: { createdAt: 'desc' }, take: 8, select: { id: true, entity: true, action: true, summary: true, author: true, createdAt: true } }),
+    ]);
+
+    const postsTotal = posts.length;
+    const vacant = posts.filter((p) => p.isVacant || p._count.memberPosts === 0).length;
+    const filled = postsTotal - vacant;
+    const postsWithoutCkp = posts.filter((p) => p.ckp === null || p.ckp.trim() === '').length;
+
+    const processesTotal = processes.length;
+    const processesDescribed = processes.filter((p) => {
+      const hasSteps = Array.isArray(p.steps) && (p.steps as unknown[]).length > 0;
+      const hasDiagram = typeof p.diagram === 'string' && p.diagram.trim() !== '';
+      const g = p.graph as { nodes?: unknown[] } | null;
+      const hasGraph = !!g && Array.isArray(g.nodes) && g.nodes.length > 0;
+      return hasSteps || hasDiagram || hasGraph;
+    }).length;
+    const processesUndescribed = processesTotal - processesDescribed;
+
+    const membersWithoutPost = members.filter((m) => m._count.posts === 0).length;
+
+    const bottlenecks: { label: string; count: number }[] = [];
+    if (vacant > 0) bottlenecks.push({ label: 'вакантних посад', count: vacant });
+    if (postsWithoutCkp > 0) bottlenecks.push({ label: 'посад без ЦКП', count: postsWithoutCkp });
+    if (processesUndescribed > 0) bottlenecks.push({ label: 'процесів без опису', count: processesUndescribed });
+    if (membersWithoutPost > 0) bottlenecks.push({ label: 'людей без посади', count: membersWithoutPost });
+    if (pendingApprovals > 0) bottlenecks.push({ label: 'змін чекають затвердження', count: pendingApprovals });
+    bottlenecks.sort((a, b) => b.count - a.count);
+
+    const dashboard = {
+      staffing: { postsTotal, filled, vacant, filledPct: postsTotal > 0 ? Math.round((filled / postsTotal) * 100) : 0 },
+      processes: { total: processesTotal, described: processesDescribed, describedPct: processesTotal > 0 ? Math.round((processesDescribed / processesTotal) * 100) : 0 },
+      changes: { last7d: changes7, last30d: changes30 },
+      pendingApprovals,
+      bottlenecks,
+      recentChanges,
+    };
+    res.json({ dashboard });
   } catch (err) {
     res.status(500).json({ error: String(err) });
   }
