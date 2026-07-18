@@ -279,6 +279,51 @@ api.delete('/org-units/:id', async (req, res) => {
   }
 });
 
+// #204 Генерація чернетки посадової інструкції з ЦКП + кроків процесів посади.
+// Детермінована збірка (правила — INSTRUCTION_RULES.md); зміст лягає на Drive (#276).
+api.post('/org-units/:id/instruction-draft', async (req, res) => {
+  try {
+    const unit = await prisma.orgUnit.findUnique({
+      where: { id: req.params.id },
+      select: { id: true, name: true, ckp: true, companyId: true, type: true, reportsTo: { select: { name: true } } },
+    });
+    if (!unit) return void res.status(404).json({ error: 'Посаду не знайдено' });
+    if (unit.type !== 'POST') return void res.status(422).json({ error: 'Інструкція генерується лише для посади (POST)' });
+    if (!unit.ckp || unit.ckp.trim() === '') return void res.status(422).json({ error: 'Спершу задайте ЦКП посади (без ЦКП інструкція не генерується).' });
+
+    const processes = await prisma.process.findMany({ where: { companyId: unit.companyId }, select: { id: true, name: true, steps: true } });
+    type Step = { postUnitId?: string; postTitle?: string; action?: string; result?: string };
+    const duties: string[] = [];
+    const involvedProcesses: { id: string; name: string }[] = [];
+    for (const p of processes) {
+      if (!Array.isArray(p.steps)) continue;
+      const mine = (p.steps as Step[]).filter((s) => s?.postUnitId === unit.id || (!!s?.postTitle && s.postTitle === unit.name));
+      if (!mine.length) continue;
+      involvedProcesses.push({ id: p.id, name: p.name });
+      for (const s of mine) {
+        const action = (s.action || '').trim();
+        const result = (s.result || '').trim();
+        if (action || result) duties.push(`${action || '—'} → ${result || '—'} _(процес: ${p.name})_`);
+      }
+    }
+
+    const nl = '\n';
+    const draft =
+      `# Посадова інструкція: ${unit.name}${nl}${nl}` +
+      `**Підпорядкування:** ${unit.reportsTo?.name || '— (заповнити)'}${nl}${nl}` +
+      `## ЦКП посади${nl}${unit.ckp}${nl}${nl}` +
+      `## Обовʼязки${nl}` +
+      (duties.length ? duties.map((d) => `- ${d}`).join(nl) : '- — (заповнити: посада ще не бере участі в жодному описаному процесі)') +
+      `${nl}${nl}## Процеси, в яких бере участь${nl}` +
+      (involvedProcesses.length ? involvedProcesses.map((p) => `- ${p.name}`).join(nl) : '- — (заповнити)') +
+      `${nl}${nl}## Показники (статистики)${nl}- — (заповнити)${nl}${nl}## Права та доступи${nl}- — (заповнити)${nl}${nl}## Вимоги${nl}- — (заповнити)${nl}`;
+
+    res.json({ title: `Посадова інструкція: ${unit.name}`, draft, involvedProcesses, dutiesCount: duties.length });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
 // #221 Процеси, в яких бере участь посада (звʼязок кроку з посадою за id, з fallback на назву).
 api.get('/org-units/:id/processes', async (req, res) => {
   try {
