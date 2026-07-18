@@ -236,3 +236,21 @@ export interface MemberCard {
 export async function getMemberCard(memberId: string): Promise<MemberCard> {
   return api<MemberCard>(`/members/${memberId}/card`);
 }
+
+// #215 Власники/інвестори з долями
+export interface Owner { id: string; name: string; kind: 'OWNER' | 'INVESTOR'; sharePct: number; note: string | null }
+export async function getOwners(companyId: string): Promise<{ owners: Owner[]; totalShare: number }> {
+  return api<{ owners: Owner[]; totalShare: number }>(`/companies/${companyId}/owners`);
+}
+
+// #202 % деталізації процесів
+export interface ProcessDetail { id: string; name: string; steps: number; filledSteps: number; hasGraph: boolean; detailPct: number }
+export async function getProcessDetail(companyId: string): Promise<{ processes: ProcessDetail[]; overallDetailPct: number }> {
+  return api<{ processes: ProcessDetail[]; overallDetailPct: number }>(`/companies/${companyId}/process-detail`);
+}
+
+// #219 дочірні структури
+export async function getSubCompanies(companyId: string): Promise<{ id: string; name: string; abbr: string | null }[]> {
+  const { subCompanies } = await api<{ subCompanies: { id: string; name: string; abbr: string | null }[] }>(`/companies/${companyId}/sub-companies`);
+  return subCompanies;
+}

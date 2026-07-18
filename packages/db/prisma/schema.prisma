@@ -21,6 +21,14 @@ enum OrgUnitType {
   POST // Посада
 }
 
+// #217 Життєвий статус одиниці (візуально відрізняється від PAEI-кольору)
+enum OrgUnitStatus {
+  CURRENT // поточна
+  PLANNED // запланована
+  TESTING // на випробуванні
+  DEPRECATED // виводиться
+}
+
 enum MemberRole {
   OWNER // власник / керівник компанії — доступ по всій компанії
   HEAD // керівник відділення/відділу — доступ у межах свого відділу
@@ -58,6 +66,16 @@ model Company {
   orgSheetId        String? // Google Sheet з оргсхемою
   googleAccountId   String? // прив'язаний OAuth Google-акаунт (для Drive/Sheets/Docs)
 
+  // #213 Стратегічний шар
+  mission      String? // мета компанії (навіщо існує)
+  companyCkp   String? // ЦКП компанії
+  idealPicture String? // ідеальна картина
+
+  // #219 Кілька підрозділів (материнська / дочірні структури)
+  parentCompanyId String?
+  parentCompany   Company?  @relation("CompanyTree", fields: [parentCompanyId], references: [id])
+  subCompanies    Company[] @relation("CompanyTree")
+
   // Слоти під Фазу 3 (білінг) — поки не використовуються
   subscriptionPlan   String?
   subscriptionStatus String?
@@ -76,6 +94,27 @@ model Company {
   embeddings   InstructionEmbedding[]
   changes      ChangeLog[]
   statistics   Statistic[]
+  owners       Owner[]
+}
+
+// #215 Власники та інвестори з долями
+enum OwnerKind {
+  OWNER
+  INVESTOR
+}
+
+model Owner {
+  id        String    @id @default(uuid())
+  companyId String
+  company   Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  name      String
+  kind      OwnerKind @default(OWNER)
+  sharePct  Float     @default(0) // частка у %
+  note      String?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@index([companyId])
 }
 
 // ── Оргсхема (джерело зв'язків; Google Sheet — дзеркало) ───
@@ -98,6 +137,7 @@ model OrgUnit {
   reportsTo       OrgUnit?  @relation("PostReports", fields: [reportsToUnitId], references: [id])
   reportsFrom     OrgUnit[] @relation("PostReports")
   isVacant        Boolean   @default(false)
+  unitStatus      OrgUnitStatus @default(CURRENT) // #217
 
   memberPosts  MemberPost[]
   instructions Instruction[]

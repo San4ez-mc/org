@@ -84,6 +84,150 @@ api.get('/companies/:id', async (req, res) => {
   }
 });
 
+// #213 Стратегічний шар + #219 материнська/дочірні + #200 Drive — оновлення компанії
+api.patch('/companies/:id', async (req, res) => {
+  try {
+    const { name, abbr, mission, companyCkp, idealPicture, parentCompanyId, driveRootFolderId, orgSheetId } = req.body ?? {};
+    const company = await prisma.company.update({
+      where: { id: req.params.id },
+      data: {
+        ...(name !== undefined && { name }),
+        ...(abbr !== undefined && { abbr: abbr || null }),
+        ...(mission !== undefined && { mission: mission || null }),
+        ...(companyCkp !== undefined && { companyCkp: companyCkp || null }),
+        ...(idealPicture !== undefined && { idealPicture: idealPicture || null }),
+        ...(parentCompanyId !== undefined && { parentCompanyId: parentCompanyId || null }),
+        ...(driveRootFolderId !== undefined && { driveRootFolderId: driveRootFolderId || null }),
+        ...(orgSheetId !== undefined && { orgSheetId: orgSheetId || null }),
+      },
+    });
+    await logChange(company.id, 'structure', 'update', 'Оновлено профіль/стратегію компанії', req.body?.author);
+    res.json({ company });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+// #219 Дочірні структури компанії
+api.get('/companies/:id/sub-companies', async (req, res) => {
+  try {
+    const subCompanies = await prisma.company.findMany({ where: { parentCompanyId: req.params.id }, select: { id: true, name: true, abbr: true } });
+    res.json({ subCompanies });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+// #215 Власники та інвестори з долями
+api.get('/companies/:id/owners', async (req, res) => {
+  try {
+    const owners = await prisma.owner.findMany({ where: { companyId: req.params.id }, orderBy: { sharePct: 'desc' } });
+    const totalShare = owners.reduce((s, o) => s + (o.sharePct || 0), 0);
+    res.json({ owners, totalShare });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+api.post('/companies/:id/owners', async (req, res) => {
+  try {
+    const { name, kind, sharePct, note } = req.body ?? {};
+    if (!name) return void res.status(400).json({ error: 'name обовʼязковий' });
+    const owner = await prisma.owner.create({
+      data: { companyId: req.params.id, name, kind: kind === 'INVESTOR' ? 'INVESTOR' : 'OWNER', sharePct: Number(sharePct) || 0, note: note || null },
+    });
+    res.json({ owner });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+api.patch('/owners/:id', async (req, res) => {
+  try {
+    const { name, kind, sharePct, note } = req.body ?? {};
+    const owner = await prisma.owner.update({
+      where: { id: req.params.id },
+      data: {
+        ...(name !== undefined && { name }),
+        ...(kind !== undefined && { kind: kind === 'INVESTOR' ? 'INVESTOR' : 'OWNER' }),
+        ...(sharePct !== undefined && { sharePct: Number(sharePct) || 0 }),
+        ...(note !== undefined && { note: note || null }),
+      },
+    });
+    res.json({ owner });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+api.delete('/owners/:id', async (req, res) => {
+  try {
+    await prisma.owner.delete({ where: { id: req.params.id } });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+// #202 Показник опису процесів (% деталізації)
+api.get('/companies/:id/process-detail', async (req, res) => {
+  try {
+    const processes = await prisma.process.findMany({ where: { companyId: req.params.id }, select: { id: true, name: true, steps: true, graph: true } });
+    const detail = processes.map((p) => {
+      const steps = Array.isArray(p.steps) ? (p.steps as { action?: string; result?: string }[]) : [];
+      const filledSteps = steps.filter((s) => (s?.action || '').trim() !== '' && (s?.result || '').trim() !== '').length;
+      const g = p.graph as { nodes?: unknown[] } | null;
+      const hasGraph = !!(g && Array.isArray(g.nodes) && g.nodes.length);
+      const detailPct = steps.length ? Math.round((filledSteps / steps.length) * 100) : (hasGraph ? 50 : 0);
+      return { id: p.id, name: p.name, steps: steps.length, filledSteps, hasGraph, detailPct };
+    });
+    const overallDetailPct = detail.length ? Math.round(detail.reduce((s, d) => s + d.detailPct, 0) / detail.length) : 0;
+    res.json({ processes: detail, overallDetailPct });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+// #199 Володіння даними: повний експорт компанії (JSON)
+api.get('/companies/:id/export', async (req, res) => {
+  try {
+    const company = await prisma.company.findUnique({
+      where: { id: req.params.id },
+      include: {
+        orgUnits: true,
+        members: { include: { posts: true } },
+        processes: true,
+        instructions: true,
+        owners: true,
+        statistics: true,
+        changes: { take: 500, orderBy: { createdAt: 'desc' } },
+      },
+    });
+    if (!company) return void res.status(404).json({ error: 'Компанію не знайдено' });
+    res.setHeader('Content-Disposition', `attachment; filename="company-${req.params.id}.json"`);
+    res.json({ exportedAt: new Date().toISOString(), company });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+// #205 Генерація тексту вакансії (детермінований шаблон з ЦКП посади)
+api.post('/org-units/:id/vacancy-draft', async (req, res) => {
+  try {
+    const unit = await prisma.orgUnit.findUnique({ where: { id: req.params.id }, select: { id: true, name: true, ckp: true, type: true, companyId: true } });
+    if (!unit) return void res.status(404).json({ error: 'Посаду не знайдено' });
+    if (unit.type !== 'POST') return void res.status(422).json({ error: 'Вакансія лише для посади (POST)' });
+    const company = await prisma.company.findUnique({ where: { id: unit.companyId }, select: { name: true } });
+    const nl = '\n';
+    const draft =
+      `Вакансія: ${unit.name}${company?.name ? ` — ${company.name}` : ''}${nl}${nl}` +
+      `Головний результат посади (ЦКП): ${unit.ckp || '— (спершу задайте ЦКП посади)'}${nl}${nl}` +
+      `Що робити: ${nl}- (виводиться з кроків процесів посади)${nl}${nl}` +
+      `Що пропонуємо: — (заповнити: умови, оплата, графік)${nl}` +
+      `Як відгукнутись: — (заповнити контакт/бот)${nl}`;
+    res.json({ title: `Вакансія: ${unit.name}`, draft });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
 // ── Працівники (люди) ─────────────────────────────────────
 api.post('/companies/:id/members', async (req, res) => {
   try {
@@ -274,10 +418,15 @@ api.get('/members/by-telegram/:tgId', async (req, res) => {
 // ── Редагування орг-одиниць ───────────────────────────────
 api.patch('/org-units/:id', async (req, res) => {
   try {
-    const { name, ckp } = req.body ?? {};
+    const { name, ckp, unitStatus } = req.body ?? {};
+    const validStatus = ['CURRENT', 'PLANNED', 'TESTING', 'DEPRECATED'];
     const unit = await prisma.orgUnit.update({
       where: { id: req.params.id },
-      data: { ...(name !== undefined && { name }), ...(ckp !== undefined && { ckp }) },
+      data: {
+        ...(name !== undefined && { name }),
+        ...(ckp !== undefined && { ckp }),
+        ...(unitStatus !== undefined && validStatus.includes(unitStatus) && { unitStatus }), // #217
+      },
     });
     await logChange(unit.companyId, 'structure', 'update', `Оновлено «${unit.name}»${ckp !== undefined ? ' (ЦКП)' : ''}`, req.body?.author);
     res.json({ unit });
