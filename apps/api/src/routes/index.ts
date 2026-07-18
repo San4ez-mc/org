@@ -279,6 +279,24 @@ api.delete('/org-units/:id', async (req, res) => {
   }
 });
 
+// #221 Процеси, в яких бере участь посада (звʼязок кроку з посадою за id, з fallback на назву).
+api.get('/org-units/:id/processes', async (req, res) => {
+  try {
+    const unit = await prisma.orgUnit.findUnique({ where: { id: req.params.id }, select: { id: true, name: true, companyId: true } });
+    if (!unit) return void res.status(404).json({ error: 'Одиницю не знайдено' });
+    const processes = await prisma.process.findMany({ where: { companyId: unit.companyId }, select: { id: true, name: true, steps: true } });
+    const involved = processes.filter((p) =>
+      Array.isArray(p.steps) &&
+      (p.steps as { postUnitId?: string; postTitle?: string }[]).some(
+        (s) => s?.postUnitId === unit.id || (!!s?.postTitle && s.postTitle === unit.name),
+      ),
+    );
+    res.json({ processes: involved.map((p) => ({ id: p.id, name: p.name })) });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
 // ── Масовий імпорт даних (відділи / посади / люди) з CSV або рядків ──
 // «Не лише через бота»: приймає { csv } (текст із заголовком) або { rows },
 // dryRun=true — попередній перегляд без запису.
@@ -621,11 +639,18 @@ api.patch('/processes/:id', async (req, res) => {
     await logChange(process.companyId, 'process', 'update', `Оновлено процес: ${process.name}`, req.body?.author);
 
     // #279 синхронність: змінились кроки → пропозиції оновити інструкції відповідальних посад.
+    // #221: посада береться за id (postUnitId), з fallback на назву (postTitle).
     if (Array.isArray(steps)) {
-      const postTitles = [...new Set((steps as { postTitle?: string }[]).map((s) => (s?.postTitle || '').trim()).filter((t) => t !== ''))];
-      if (postTitles.length) {
+      const typedSteps = steps as { postUnitId?: string; postTitle?: string }[];
+      const stepPostIds = [...new Set(typedSteps.map((s) => (s?.postUnitId || '').trim()).filter((t) => t !== ''))];
+      const postTitles = [...new Set(typedSteps.map((s) => (s?.postTitle || '').trim()).filter((t) => t !== ''))];
+      if (stepPostIds.length || postTitles.length) {
         const posts = await prisma.orgUnit.findMany({
-          where: { companyId: process.companyId, type: 'POST', name: { in: postTitles } },
+          where: {
+            companyId: process.companyId,
+            type: 'POST',
+            OR: [{ id: { in: stepPostIds } }, { name: { in: postTitles } }],
+          },
           select: { id: true },
         });
         const postIds = posts.map((p) => p.id);

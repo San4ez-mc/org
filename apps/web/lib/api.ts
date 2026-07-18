@@ -214,3 +214,10 @@ export async function getInstructions(companyId: string): Promise<DriveNode[]> {
   const { tree } = await api<{ tree: DriveNode[] }>(`/companies/${companyId}/instructions`);
   return tree;
 }
+
+// #221 Процеси, в яких бере участь посада (за id кроку, fallback на назву).
+export interface PostProcess { id: string; name: string }
+export async function getPostProcesses(postUnitId: string): Promise<PostProcess[]> {
+  const { processes } = await api<{ processes: PostProcess[] }>(`/org-units/${postUnitId}/processes`);
+  return processes;
+}
