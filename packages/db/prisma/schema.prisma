@@ -139,6 +139,7 @@ model OrgUnit {
   reportsFrom     OrgUnit[] @relation("PostReports")
   isVacant        Boolean   @default(false)
   unitStatus      OrgUnitStatus @default(CURRENT) // #217
+  salary          Float?    // #198 місячна вартість посади (для ФОП/планування штату)
 
   memberPosts  MemberPost[]
   instructions Instruction[]
@@ -414,6 +415,17 @@ model Candidate {
   updatedAt    DateTime @updatedAt
 
   @@index([companyId])
+}
+
+// #226 Ознайомлення/підпис посадової інструкції («прочитав і приймаю»)
+model InstructionAck {
+  id             String   @id @default(uuid())
+  instructionId  String
+  memberId       String
+  acknowledgedAt DateTime @default(now())
+
+  @@unique([instructionId, memberId])
+  @@index([instructionId])
 }
 
 // #192 Сповіщення (доставка — через спільний примітив надсилання, G5)

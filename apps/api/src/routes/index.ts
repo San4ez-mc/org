@@ -381,6 +381,69 @@ api.get('/members/:id/onboarding', async (req, res) => {
   } catch (err) { res.status(500).json({ error: String(err) }); }
 });
 
+// #198 Вартість оргструктури (ФОП по відділеннях + планування найму)
+api.get('/companies/:id/payroll', async (req, res) => {
+  try {
+    const companyId = req.params.id;
+    const units = await prisma.orgUnit.findMany({
+      where: { companyId },
+      select: { id: true, name: true, type: true, parentId: true, boardNo: true, salary: true, isVacant: true, _count: { select: { memberPosts: { where: { removedAt: null } } } } },
+    });
+    const byId = new Map(units.map((u) => [u.id, u]));
+    // Знайти відділення (DIVISION) — корінь ланцюга parent
+    const divisionOf = (u: (typeof units)[number]): string | null => {
+      let cur: (typeof units)[number] | undefined = u;
+      const seen = new Set<string>();
+      while (cur && !seen.has(cur.id)) {
+        seen.add(cur.id);
+        if (cur.type === 'DIVISION') return cur.name;
+        cur = cur.parentId ? byId.get(cur.parentId) : undefined;
+      }
+      return null;
+    };
+    const posts = units.filter((u) => u.type === 'POST');
+    const divTotals: Record<string, { filled: number; planned: number }> = {};
+    let filledTotal = 0;
+    let plannedTotal = 0; // вартість вакансій, які планується заповнити
+    for (const p of posts) {
+      const div = divisionOf(p) || '— (без відділення)';
+      divTotals[div] = divTotals[div] || { filled: 0, planned: 0 };
+      const cost = p.salary || 0;
+      const vacant = p.isVacant || p._count.memberPosts === 0;
+      if (vacant) { divTotals[div].planned += cost; plannedTotal += cost; }
+      else { divTotals[div].filled += cost; filledTotal += cost; }
+    }
+    res.json({
+      byDivision: Object.entries(divTotals).map(([division, v]) => ({ division, filledCost: v.filled, plannedCost: v.planned, total: v.filled + v.planned })),
+      currentPayroll: filledTotal, // ФОП чинний
+      plannedHiringCost: plannedTotal, // додатковий ФОП при заповненні вакансій
+      projectedPayroll: filledTotal + plannedTotal,
+    });
+  } catch (err) { res.status(500).json({ error: String(err) }); }
+});
+
+// #226 Ознайомлення/підпис інструкції
+api.post('/instruction-records/:id/acknowledge', async (req, res) => {
+  try {
+    const { memberId } = req.body ?? {};
+    if (!memberId) return void res.status(400).json({ error: 'memberId обовʼязковий' });
+    const ack = await prisma.instructionAck.upsert({
+      where: { instructionId_memberId: { instructionId: req.params.id, memberId } },
+      create: { instructionId: req.params.id, memberId },
+      update: {},
+    });
+    res.json({ ack });
+  } catch (err) { res.status(500).json({ error: String(err) }); }
+});
+api.get('/instruction-records/:id/acknowledgements', async (req, res) => {
+  try {
+    const acks = await prisma.instructionAck.findMany({ where: { instructionId: req.params.id }, orderBy: { acknowledgedAt: 'desc' } });
+    const members = await prisma.member.findMany({ where: { id: { in: acks.map((a) => a.memberId) } }, select: { id: true, firstName: true, lastName: true } });
+    const nameById = new Map(members.map((m) => [m.id, `${m.firstName} ${m.lastName || ''}`.trim()]));
+    res.json({ acknowledgements: acks.map((a) => ({ memberId: a.memberId, name: nameById.get(a.memberId) || a.memberId, acknowledgedAt: a.acknowledgedAt })) });
+  } catch (err) { res.status(500).json({ error: String(err) }); }
+});
+
 // #195 Портфель клієнтів (супер-адмін): усі компанії з показниками
 api.get('/portfolio', async (_req, res) => {
   try {
@@ -675,7 +738,7 @@ api.get('/members/by-telegram/:tgId', async (req, res) => {
 // ── Редагування орг-одиниць ───────────────────────────────
 api.patch('/org-units/:id', async (req, res) => {
   try {
-    const { name, ckp, unitStatus } = req.body ?? {};
+    const { name, ckp, unitStatus, salary } = req.body ?? {};
     const validStatus = ['CURRENT', 'PLANNED', 'TESTING', 'DEPRECATED'];
     const unit = await prisma.orgUnit.update({
       where: { id: req.params.id },
@@ -683,6 +746,7 @@ api.patch('/org-units/:id', async (req, res) => {
         ...(name !== undefined && { name }),
         ...(ckp !== undefined && { ckp }),
         ...(unitStatus !== undefined && validStatus.includes(unitStatus) && { unitStatus }), // #217
+        ...(salary !== undefined && { salary: salary === null || salary === '' ? null : Number(salary) }), // #198
       },
     });
     await logChange(unit.companyId, 'structure', 'update', `Оновлено «${unit.name}»${ckp !== undefined ? ' (ЦКП)' : ''}`, req.body?.author, unit.id);
