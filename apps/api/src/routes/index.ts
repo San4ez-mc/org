@@ -24,6 +24,16 @@ async function logChange(companyId: string, entity: string, action: string, summ
   }
 }
 
+/** #192 Створити сповіщення (доставка — через спільний примітив надсилання, G5). */
+async function notify(companyId: string, type: string, message: string, targetMemberId?: string) {
+  try {
+    await prisma.orgNotification.create({ data: { companyId, type, message, targetMemberId: targetMemberId ?? null } });
+    // TODO(G5): доставити через спільний send-примітив (SMTP + Telegram-send за токеном).
+  } catch {
+    /* ignore */
+  }
+}
+
 const notImplemented = (name: string) => (_: unknown, res: any) =>
   res.status(501).json({ error: `${name} ще не реалізовано (заглушка I1)` });
 
@@ -87,7 +97,7 @@ api.get('/companies/:id', async (req, res) => {
 // #213 Стратегічний шар + #219 материнська/дочірні + #200 Drive — оновлення компанії
 api.patch('/companies/:id', async (req, res) => {
   try {
-    const { name, abbr, mission, companyCkp, idealPicture, parentCompanyId, driveRootFolderId, orgSheetId } = req.body ?? {};
+    const { name, abbr, mission, companyCkp, idealPicture, parentCompanyId, driveRootFolderId, orgSheetId, adizesStage } = req.body ?? {};
     const company = await prisma.company.update({
       where: { id: req.params.id },
       data: {
@@ -96,6 +106,7 @@ api.patch('/companies/:id', async (req, res) => {
         ...(mission !== undefined && { mission: mission || null }),
         ...(companyCkp !== undefined && { companyCkp: companyCkp || null }),
         ...(idealPicture !== undefined && { idealPicture: idealPicture || null }),
+        ...(adizesStage !== undefined && { adizesStage: adizesStage || null }),
         ...(parentCompanyId !== undefined && { parentCompanyId: parentCompanyId || null }),
         ...(driveRootFolderId !== undefined && { driveRootFolderId: driveRootFolderId || null }),
         ...(orgSheetId !== undefined && { orgSheetId: orgSheetId || null }),
@@ -368,6 +379,107 @@ api.get('/members/:id/onboarding', async (req, res) => {
       completed: trainings.length > 0 && trainings.every((t) => passedSet.has(t.id)),
     });
   } catch (err) { res.status(500).json({ error: String(err) }); }
+});
+
+// #195 Портфель клієнтів (супер-адмін): усі компанії з показниками
+api.get('/portfolio', async (_req, res) => {
+  try {
+    const companies = await prisma.company.findMany({ select: { id: true, name: true, abbr: true, createdAt: true, adizesStage: true } });
+    const rows = await Promise.all(companies.map(async (c) => {
+      const [units, members, processes, pendingApprovals, vacancies] = await Promise.all([
+        prisma.orgUnit.count({ where: { companyId: c.id } }),
+        prisma.member.count({ where: { companyId: c.id, status: 'EMPLOYED' } }),
+        prisma.process.count({ where: { companyId: c.id } }),
+        prisma.proposal.count({ where: { companyId: c.id, status: 'PENDING' } }),
+        prisma.orgUnit.count({ where: { companyId: c.id, type: 'POST', isVacant: true } }),
+      ]);
+      return { ...c, units, members, processes, pendingApprovals, vacancies };
+    }));
+    res.json({ companies: rows });
+  } catch (err) { res.status(500).json({ error: String(err) }); }
+});
+
+// #196 Рекрутинг-воронка: кандидати на вакансію
+api.get('/companies/:id/candidates', async (req, res) => {
+  try { res.json({ candidates: await prisma.candidate.findMany({ where: { companyId: req.params.id }, orderBy: { createdAt: 'desc' } }) }); }
+  catch (err) { res.status(500).json({ error: String(err) }); }
+});
+api.post('/companies/:id/candidates', async (req, res) => {
+  try {
+    const { name, contact, vacancyUnitId, aiScore, notes } = req.body ?? {};
+    if (!name) return void res.status(400).json({ error: 'name обовʼязковий' });
+    const candidate = await prisma.candidate.create({ data: { companyId: req.params.id, name, contact: contact || null, vacancyUnitId: vacancyUnitId || null, aiScore: aiScore != null ? Number(aiScore) : null, notes: notes || null } });
+    await notify(req.params.id, 'vacancy', `Новий кандидат: ${name}`);
+    res.json({ candidate });
+  } catch (err) { res.status(500).json({ error: String(err) }); }
+});
+api.patch('/candidates/:id', async (req, res) => {
+  try {
+    const { status, aiScore, notes, contact } = req.body ?? {};
+    const candidate = await prisma.candidate.update({ where: { id: req.params.id }, data: {
+      ...(status !== undefined && { status: String(status) }),
+      ...(aiScore !== undefined && { aiScore: aiScore != null ? Number(aiScore) : null }),
+      ...(notes !== undefined && { notes: notes || null }),
+      ...(contact !== undefined && { contact: contact || null }),
+    } });
+    res.json({ candidate });
+  } catch (err) { res.status(500).json({ error: String(err) }); }
+});
+
+// #207 Цільова структура за етапом Адізеса (rule-based підказка)
+api.get('/companies/:id/adizes-target', async (req, res) => {
+  try {
+    const company = await prisma.company.findUnique({ where: { id: req.params.id }, select: { adizesStage: true } });
+    const stage = (company?.adizesStage || '').toLowerCase();
+    const map: Record<string, { focus: string; strengthen: string[] }> = {
+      courtship: { focus: 'ідея і відданість', strengthen: ['Адміністративне (мінімум)', 'Розповсюдження (тест ринку)'] },
+      infancy: { focus: 'продажі і виживання', strengthen: ['Розповсюдження', 'Фінансове (кеш)'] },
+      'go-go': { focus: 'ріст, ризик розпорошення', strengthen: ['Адміністративне', 'Технічне/Виробництво'] },
+      adolescence: { focus: 'системи і делегування', strengthen: ['Адміністративне', 'Персоналу/Побудови', 'Фінансове'] },
+      prime: { focus: 'баланс P-A-E-I', strengthen: ['Кваліфікації', 'По роботі з публікою'] },
+    };
+    const rec = map[stage] || { focus: 'визначити етап (adizesStage)', strengthen: [] };
+    res.json({ stage: company?.adizesStage || null, focus: rec.focus, strengthenDivisions: rec.strengthen });
+  } catch (err) { res.status(500).json({ error: String(err) }); }
+});
+
+// #208 Аналіз структури/процесів (rule-based: слабкі місця + рекомендації за Адізесом)
+api.get('/companies/:id/analysis', async (req, res) => {
+  try {
+    const companyId = req.params.id;
+    const [posts, divisions, processes, members] = await Promise.all([
+      prisma.orgUnit.findMany({ where: { companyId, type: 'POST' }, select: { ckp: true, isVacant: true, _count: { select: { memberPosts: { where: { removedAt: null } } } } } }),
+      prisma.orgUnit.findMany({ where: { companyId, type: 'DIVISION' }, select: { ckp: true } }),
+      prisma.process.findMany({ where: { companyId }, select: { steps: true } }),
+      prisma.member.findMany({ where: { companyId, status: 'EMPLOYED' }, select: { _count: { select: { posts: { where: { removedAt: null } } } } } }),
+    ]);
+    const findings: { severity: 'high' | 'medium' | 'low'; issue: string; recommendation: string }[] = [];
+    const postsNoCkp = posts.filter((p) => !p.ckp || p.ckp.trim() === '').length;
+    if (postsNoCkp) findings.push({ severity: 'high', issue: `${postsNoCkp} посад без ЦКП`, recommendation: 'Задати ЦКП кожній посаді (Адізес: слабке P — незрозумілий продукт).' });
+    const divNoCkp = divisions.filter((d) => !d.ckp || d.ckp.trim() === '').length;
+    if (divNoCkp) findings.push({ severity: 'medium', issue: `${divNoCkp} відділень без ЦКП`, recommendation: 'Визначити ЦКП відділень.' });
+    const vacant = posts.filter((p) => p.isVacant || p._count.memberPosts === 0).length;
+    if (vacant) findings.push({ severity: 'medium', issue: `${vacant} вакантних посад`, recommendation: 'Запустити рекрутинг-воронку (#196).' });
+    const overloaded = members.filter((m) => m._count.posts >= 3).length;
+    if (overloaded) findings.push({ severity: 'high', issue: `${overloaded} людей на 3+ посадах`, recommendation: 'Перевантаження ("власник — вузьке місце") — делегувати/наймати.' });
+    const undescribed = processes.filter((p) => !Array.isArray(p.steps) || (p.steps as unknown[]).length === 0).length;
+    if (undescribed) findings.push({ severity: 'low', issue: `${undescribed} процесів без кроків`, recommendation: 'Описати кроки — база для інструкцій і навчання.' });
+    if (divisions.length < 7) findings.push({ severity: 'low', issue: `Задіяно ${divisions.length}/7 відділень`, recommendation: 'Перевірити, чи всі 7 функцій закриті.' });
+    const score = Math.max(0, 100 - findings.reduce((s, f) => s + (f.severity === 'high' ? 20 : f.severity === 'medium' ? 10 : 5), 0));
+    res.json({ findings, score });
+  } catch (err) { res.status(500).json({ error: String(err) }); }
+});
+
+// #192 Сповіщення
+api.get('/companies/:id/notifications', async (req, res) => {
+  try {
+    const notifications = await prisma.orgNotification.findMany({ where: { companyId: req.params.id }, orderBy: { createdAt: 'desc' }, take: 100 });
+    res.json({ notifications, unread: notifications.filter((n) => !n.read).length });
+  } catch (err) { res.status(500).json({ error: String(err) }); }
+});
+api.post('/notifications/:id/read', async (req, res) => {
+  try { await prisma.orgNotification.update({ where: { id: req.params.id }, data: { read: true } }); res.json({ ok: true }); }
+  catch (err) { res.status(500).json({ error: String(err) }); }
 });
 
 // ── Працівники (люди) ─────────────────────────────────────
@@ -1313,9 +1425,11 @@ async function createProposal(
   createdBy?: string,
 ) {
   try {
-    return await prisma.proposal.create({
+    const p = await prisma.proposal.create({
       data: { companyId, type, payload: payload as object, targetInstructionId: targetInstructionId ?? null, createdBy: createdBy ?? null },
     });
+    await notify(companyId, 'approval', 'Нова пропозиція змін очікує затвердження'); // #192
+    return p;
   } catch {
     return null;
   }

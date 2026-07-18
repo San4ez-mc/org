@@ -70,6 +70,7 @@ model Company {
   mission      String? // мета компанії (навіщо існує)
   companyCkp   String? // ЦКП компанії
   idealPicture String? // ідеальна картина
+  adizesStage  String? // #207 етап життєвого циклу за Адізесом
 
   // #219 Кілька підрозділів (материнська / дочірні структури)
   parentCompanyId String?
@@ -397,6 +398,36 @@ model TrainingResult {
 
   @@unique([trainingId, memberId])
   @@index([memberId])
+}
+
+// #196 Рекрутинг-воронка: кандидати на вакансію
+model Candidate {
+  id           String   @id @default(uuid())
+  companyId    String
+  vacancyUnitId String? // посада-вакансія (OrgUnit)
+  name         String
+  contact      String?
+  status       String   @default("new") // new | interview | hired | rejected
+  aiScore      Int? // релевантність (0-100), заповнює агент оцінки
+  notes        String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([companyId])
+}
+
+// #192 Сповіщення (доставка — через спільний примітив надсилання, G5)
+model OrgNotification {
+  id             String   @id @default(uuid())
+  companyId      String
+  type           String // approval | change | vacancy
+  message        String
+  targetMemberId String?
+  delivered      Boolean  @default(false)
+  read           Boolean  @default(false)
+  createdAt      DateTime @default(now())
+
+  @@index([companyId, read])
 }
 
 // ── Технічні події/логи (боти, api, worker) ───────────────
