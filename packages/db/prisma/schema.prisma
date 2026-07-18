@@ -27,6 +27,11 @@ enum MemberRole {
   EMPLOYEE // співробітник — свої інструкції
 }
 
+enum MemberStatus {
+  EMPLOYED // працює
+  DISMISSED // звільнений
+}
+
 enum InstructionStatus {
   DRAFT
   ACTIVE
@@ -142,6 +147,11 @@ model Member {
   role             MemberRole @default(EMPLOYEE)
   accessToken      String?    @unique // особисте посилання входу до порталу працівника
 
+  // Життєвий цикл працівника (#211)
+  hireDate         DateTime?    // дата прийому
+  status           MemberStatus @default(EMPLOYED)
+  dismissedAt      DateTime?    // дата звільнення
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -160,7 +170,8 @@ model MemberPost {
   postUnitId String
   postUnit   OrgUnit @relation(fields: [postUnitId], references: [id], onDelete: Cascade)
 
-  createdAt DateTime @default(now())
+  createdAt DateTime  @default(now())
+  removedAt DateTime? // #211 soft-delete для історії посад (null = чинне призначення)
 
   @@unique([memberId, postUnitId])
   @@index([postUnitId])

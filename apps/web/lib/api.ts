@@ -221,3 +221,18 @@ export async function getPostProcesses(postUnitId: string): Promise<PostProcess[
   const { processes } = await api<{ processes: PostProcess[] }>(`/org-units/${postUnitId}/processes`);
   return processes;
 }
+
+// #211 Картка працівника: життєвий цикл + чинні/минулі посади.
+export interface MemberPostRef { id: string; name: string; assignedAt: string; removedAt: string | null }
+export interface MemberCard {
+  member: {
+    id: string; firstName: string; lastName: string | null; email: string | null;
+    birthDate: string | null; photoUrl: string | null; role: string;
+    hireDate: string | null; status: 'EMPLOYED' | 'DISMISSED'; dismissedAt: string | null; createdAt: string;
+  };
+  currentPosts: MemberPostRef[];
+  pastPosts: MemberPostRef[];
+}
+export async function getMemberCard(memberId: string): Promise<MemberCard> {
+  return api<MemberCard>(`/members/${memberId}/card`);
+}

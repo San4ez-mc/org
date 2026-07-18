@@ -71,7 +71,7 @@ api.get('/companies/:id', async (req, res) => {
       include: {
         orgUnits: { orderBy: [{ boardNo: 'asc' }, { orderNo: 'asc' }] },
         processes: { orderBy: { createdAt: 'asc' } },
-        members: { include: { posts: { include: { postUnit: { select: { id: true, name: true } } } } }, orderBy: { createdAt: 'asc' } },
+        members: { include: { posts: { where: { removedAt: null }, include: { postUnit: { select: { id: true, name: true } } } } }, orderBy: { createdAt: 'asc' } },
       },
     });
     if (!company) {
@@ -112,7 +112,7 @@ api.post('/companies/:id/members', async (req, res) => {
 
 api.patch('/members/:id', async (req, res) => {
   try {
-    const { firstName, lastName, telegramUserId, telegramUsername, email, birthDate, photoUrl, role } = req.body ?? {};
+    const { firstName, lastName, telegramUserId, telegramUsername, email, birthDate, photoUrl, role, hireDate, status, dismissedAt } = req.body ?? {};
     const member = await prisma.member.update({
       where: { id: req.params.id },
       data: {
@@ -124,6 +124,10 @@ api.patch('/members/:id', async (req, res) => {
         ...(birthDate !== undefined && { birthDate: birthDate ? new Date(birthDate) : null }),
         ...(photoUrl !== undefined && { photoUrl }),
         ...(role !== undefined && { role }),
+        // #211 життєвий цикл
+        ...(hireDate !== undefined && { hireDate: hireDate ? new Date(hireDate) : null }),
+        ...(status !== undefined && { status: status === 'DISMISSED' ? 'DISMISSED' : 'EMPLOYED' }),
+        ...(dismissedAt !== undefined && { dismissedAt: dismissedAt ? new Date(dismissedAt) : null }),
       },
     });
     res.json({ member });
@@ -151,7 +155,7 @@ api.post('/members/:id/posts', async (req, res) => {
     await prisma.memberPost.upsert({
       where: { memberId_postUnitId: { memberId: req.params.id, postUnitId } },
       create: { memberId: req.params.id, postUnitId },
-      update: {},
+      update: { removedAt: null }, // #211 повторне призначення — «оживити» рядок
     });
     res.json({ ok: true });
   } catch (err) {
@@ -161,8 +165,40 @@ api.post('/members/:id/posts', async (req, res) => {
 
 api.delete('/members/:id/posts/:postUnitId', async (req, res) => {
   try {
-    await prisma.memberPost.deleteMany({ where: { memberId: req.params.id, postUnitId: req.params.postUnitId } });
+    // #211 soft-delete: лишаємо рядок з removedAt для історії посад
+    await prisma.memberPost.updateMany({
+      where: { memberId: req.params.id, postUnitId: req.params.postUnitId, removedAt: null },
+      data: { removedAt: new Date() },
+    });
     res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+// #211 Картка працівника: життєвий цикл + чинні й минулі посади
+api.get('/members/:id/card', async (req, res) => {
+  try {
+    const member = await prisma.member.findUnique({
+      where: { id: req.params.id },
+      select: {
+        id: true, firstName: true, lastName: true, email: true, birthDate: true, photoUrl: true,
+        role: true, hireDate: true, status: true, dismissedAt: true, createdAt: true,
+        posts: {
+          include: { postUnit: { select: { id: true, name: true } } },
+          orderBy: { createdAt: 'asc' },
+        },
+      },
+    });
+    if (!member) return void res.status(404).json({ error: 'Працівника не знайдено' });
+    const toPost = (p: { postUnit: { id: string; name: string }; createdAt: Date; removedAt: Date | null }) => ({
+      id: p.postUnit.id, name: p.postUnit.name, assignedAt: p.createdAt, removedAt: p.removedAt,
+    });
+    const currentPosts = member.posts.filter((p) => !p.removedAt).map(toPost);
+    const pastPosts = member.posts.filter((p) => p.removedAt).map(toPost);
+    const { posts, ...lifecycle } = member;
+    void posts;
+    res.json({ member: lifecycle, currentPosts, pastPosts });
   } catch (err) {
     res.status(500).json({ error: String(err) });
   }
@@ -216,7 +252,7 @@ api.post('/members/:id/access-token', async (req, res) => {
 // Зведення для працівника за особистим токеном (портал)
 api.get('/me/:token', async (req, res) => {
   try {
-    const member = await prisma.member.findUnique({ where: { accessToken: req.params.token }, include: { posts: true } });
+    const member = await prisma.member.findUnique({ where: { accessToken: req.params.token }, include: { posts: { where: { removedAt: null } } } });
     if (!member) return res.status(404).json({ error: 'not found' });
     res.json({ summary: await buildMemberSummary(member) });
   } catch (err) {
@@ -227,7 +263,7 @@ api.get('/me/:token', async (req, res) => {
 // Зведення для працівника за Telegram id (для бота-самообслуговування)
 api.get('/members/by-telegram/:tgId', async (req, res) => {
   try {
-    const member = await prisma.member.findFirst({ where: { telegramUserId: req.params.tgId }, include: { posts: true } });
+    const member = await prisma.member.findFirst({ where: { telegramUserId: req.params.tgId }, include: { posts: { where: { removedAt: null } } } });
     if (!member) return res.status(404).json({ error: 'not found' });
     res.json({ summary: await buildMemberSummary(member) });
   } catch (err) {
@@ -857,7 +893,7 @@ api.get('/companies/:id/health', async (req, res) => {
       }),
       prisma.member.findMany({
         where: { companyId },
-        select: { id: true, firstName: true, lastName: true, _count: { select: { posts: true } } },
+        select: { id: true, firstName: true, lastName: true, _count: { select: { posts: { where: { removedAt: null } } } } },
         orderBy: { createdAt: 'asc' },
       }),
     ]);
@@ -921,7 +957,7 @@ api.get('/companies/:id/dashboard', async (req, res) => {
         select: { id: true, name: true, ckp: true, isVacant: true, _count: { select: { memberPosts: true } } },
       }),
       prisma.process.findMany({ where: { companyId }, select: { steps: true, diagram: true, graph: true } }),
-      prisma.member.findMany({ where: { companyId }, select: { _count: { select: { posts: true } } } }),
+      prisma.member.findMany({ where: { companyId }, select: { _count: { select: { posts: { where: { removedAt: null } } } } } }),
       prisma.changeLog.count({ where: { companyId, createdAt: { gte: since7 } } }),
       prisma.changeLog.count({ where: { companyId, createdAt: { gte: since30 } } }),
       prisma.proposal.count({ where: { companyId, status: 'PENDING' } }),
