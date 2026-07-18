@@ -275,6 +275,174 @@ api.delete('/org-units/:id', async (req, res) => {
   }
 });
 
+// ── Масовий імпорт даних (відділи / посади / люди) з CSV або рядків ──
+// «Не лише через бота»: приймає { csv } (текст із заголовком) або { rows },
+// dryRun=true — попередній перегляд без запису.
+interface ImportRow {
+  division?: string;
+  department?: string;
+  post?: string;
+  ckp?: string;
+  firstName?: string;
+  lastName?: string;
+  email?: string;
+  telegramUsername?: string;
+}
+
+// Мінімальний, але коректний CSV-парсер (лапки, коми в лапках, CRLF).
+function parseCsv(text: string): ImportRow[] {
+  const records: string[][] = [];
+  let field = '';
+  let row: string[] = [];
+  let inQuotes = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (inQuotes) {
+      if (ch === '"') {
+        if (text[i + 1] === '"') { field += '"'; i++; }
+        else inQuotes = false;
+      } else field += ch;
+    } else if (ch === '"') inQuotes = true;
+    else if (ch === ',') { row.push(field); field = ''; }
+    else if (ch === '\n') { row.push(field); records.push(row); row = []; field = ''; }
+    else if (ch === '\r') { /* skip */ }
+    else field += ch;
+  }
+  if (field !== '' || row.length) { row.push(field); records.push(row); }
+
+  const nonEmpty = records.filter((r) => r.some((c) => c.trim() !== ''));
+  if (nonEmpty.length < 2) return [];
+
+  const alias: Record<string, keyof ImportRow> = {
+    division: 'division', відділення: 'division',
+    department: 'department', відділ: 'department',
+    post: 'post', посада: 'post', позиція: 'post',
+    ckp: 'ckp', цкп: 'ckp',
+    firstname: 'firstName', first_name: 'firstName', імя: 'firstName', "ім'я": 'firstName', name: 'firstName',
+    lastname: 'lastName', last_name: 'lastName', прізвище: 'lastName',
+    email: 'email', пошта: 'email',
+    telegram: 'telegramUsername', telegramusername: 'telegramUsername', телеграм: 'telegramUsername',
+  };
+  const header = nonEmpty[0].map((h) => alias[h.trim().toLowerCase()] ?? null);
+
+  return nonEmpty.slice(1).map((cols) => {
+    const r: ImportRow = {};
+    header.forEach((key, idx) => {
+      if (!key) return;
+      const val = (cols[idx] ?? '').trim();
+      if (val !== '') r[key] = val;
+    });
+    return r;
+  });
+}
+
+api.post('/companies/:id/import', async (req, res) => {
+  try {
+    const companyId = req.params.id;
+    const company = await prisma.company.findUnique({ where: { id: companyId }, select: { id: true } });
+    if (!company) return void res.status(404).json({ error: 'Компанію не знайдено' });
+
+    const dryRun = Boolean(req.body?.dryRun);
+    let rows: ImportRow[] = Array.isArray(req.body?.rows) ? req.body.rows : [];
+    if (!rows.length && typeof req.body?.csv === 'string') rows = parseCsv(req.body.csv);
+    if (!rows.length) return void res.status(400).json({ error: 'Порожній імпорт: передайте rows[] або csv (з рядком-заголовком).' });
+
+    const summary = {
+      rows: rows.length,
+      divisionsCreated: 0, departmentsCreated: 0, postsCreated: 0,
+      membersCreated: 0, membersAssigned: 0, errors: [] as { row: number; error: string }[],
+    };
+
+    // Кеші «назва → id», щоб повтори в файлі не дублювались.
+    const unitCache = new Map<string, string>();
+
+    const findOrCreateUnit = async (
+      type: 'DIVISION' | 'DEPARTMENT' | 'POST',
+      name: string,
+      parentId: string | null,
+      ckp: string | null,
+    ): Promise<string> => {
+      const key = `${type}:${parentId ?? '-'}:${name.toLowerCase()}`;
+      const cached = unitCache.get(key);
+      if (cached) return cached;
+      const existing = await prisma.orgUnit.findFirst({ where: { companyId, type, name }, select: { id: true } });
+      if (existing) { unitCache.set(key, existing.id); return existing.id; }
+      if (dryRun) {
+        const tmp = `new:${key}`;
+        unitCache.set(key, tmp);
+        if (type === 'DIVISION') summary.divisionsCreated++;
+        else if (type === 'DEPARTMENT') summary.departmentsCreated++;
+        else summary.postsCreated++;
+        return tmp;
+      }
+      const created = await prisma.orgUnit.create({ data: { companyId, type, name, parentId: parentId ?? null, ckp: ckp ?? null } });
+      unitCache.set(key, created.id);
+      if (type === 'DIVISION') summary.divisionsCreated++;
+      else if (type === 'DEPARTMENT') summary.departmentsCreated++;
+      else summary.postsCreated++;
+      return created.id;
+    };
+
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i];
+      try {
+        let divisionId: string | null = null;
+        let departmentId: string | null = null;
+        let postId: string | null = null;
+
+        if (r.division) divisionId = await findOrCreateUnit('DIVISION', r.division, null, null);
+        if (r.department) departmentId = await findOrCreateUnit('DEPARTMENT', r.department, divisionId, null);
+        if (r.post) postId = await findOrCreateUnit('POST', r.post, departmentId ?? divisionId, r.ckp ?? null);
+
+        if (r.firstName) {
+          const email = r.email?.trim() || null;
+          let memberId: string | null = null;
+          const existingMember = email
+            ? await prisma.member.findFirst({ where: { companyId, email }, select: { id: true } })
+            : await prisma.member.findFirst({ where: { companyId, firstName: r.firstName, lastName: r.lastName ?? null }, select: { id: true } });
+
+          if (existingMember) memberId = existingMember.id;
+          else if (dryRun) { memberId = `new:member:${i}`; summary.membersCreated++; }
+          else {
+            const created = await prisma.member.create({
+              data: {
+                companyId, firstName: r.firstName, lastName: r.lastName || null,
+                email, telegramUsername: r.telegramUsername || null, role: 'EMPLOYEE',
+              },
+              select: { id: true },
+            });
+            memberId = created.id;
+            summary.membersCreated++;
+          }
+
+          if (postId && memberId && !dryRun && !postId.startsWith('new:') && !memberId.startsWith('new:')) {
+            await prisma.memberPost.upsert({
+              where: { memberId_postUnitId: { memberId, postUnitId: postId } },
+              create: { memberId, postUnitId: postId },
+              update: {},
+            });
+            summary.membersAssigned++;
+          } else if (postId && memberId && dryRun) {
+            summary.membersAssigned++;
+          }
+        }
+      } catch (rowErr) {
+        summary.errors.push({ row: i + 1, error: String(rowErr) });
+      }
+    }
+
+    if (!dryRun && (summary.divisionsCreated + summary.departmentsCreated + summary.postsCreated + summary.membersCreated) > 0) {
+      await logChange(companyId, 'structure', 'create',
+        `Імпорт: +${summary.departmentsCreated} відділів, +${summary.postsCreated} посад, +${summary.membersCreated} людей`,
+        req.body?.author);
+    }
+
+    res.json({ dryRun, summary });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
 // ── Дерево посадових інструкцій (з Drive: Побудова → Посадові інструкції) ──
 api.get('/companies/:id/instructions', async (req, res) => {
   try {
