@@ -459,6 +459,135 @@ api.get('/companies/:id/instructions', async (req, res) => {
   }
 });
 
+// ── Інструкції як first-class записи БД (#276) ─────────────
+// Зміст інструкцій — на Google Drive (driveDocId, G3); у БД лише посилання +
+// метадані + звʼязки (посада/процес) + версія. Журнал фіксує тільки що змінилось.
+function shapeInstruction(r: any) {
+  return {
+    id: r.id,
+    title: r.title,
+    status: r.status,
+    version: r.version,
+    driveDocId: r.driveDocId ?? null,
+    folderPath: r.folderPath ?? null,
+    postUnitId: r.postUnitId ?? null,
+    post: r.postUnit ? { id: r.postUnit.id, name: r.postUnit.name } : null,
+    processId: r.processId ?? null,
+    process: r.process ? { id: r.process.id, name: r.process.name } : null,
+    createdAt: r.createdAt,
+    updatedAt: r.updatedAt,
+  };
+}
+
+// Гачок індексації у вектор-мікросервіс (#263/#280). Поки заглушка: реальний виклик
+// зʼявиться, коли буде мапа компанія→проєкт/токен вектор-сервісу. Не блокує запис.
+async function queueInstructionIndexing(_instructionId: string): Promise<void> {
+  // TODO(#263): POST {VECTOR_SERVICE_URL}/ingest — driveDocId + чанки за токеном компанії.
+  return;
+}
+
+const instructionInclude = {
+  postUnit: { select: { id: true, name: true } },
+  process: { select: { id: true, name: true } },
+} as const;
+
+api.get('/companies/:id/instruction-records', async (req, res) => {
+  try {
+    const companyId = req.params.id;
+    const postUnitId = typeof req.query.postUnitId === 'string' ? req.query.postUnitId : undefined;
+    const rows = await prisma.instruction.findMany({
+      where: { companyId, ...(postUnitId ? { postUnitId } : {}) },
+      include: instructionInclude,
+      orderBy: { createdAt: 'desc' },
+    });
+    res.json({ instructions: rows.map(shapeInstruction) });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+api.post('/companies/:id/instruction-records', async (req, res) => {
+  try {
+    const companyId = req.params.id;
+    const { title, postUnitId, processId, driveDocId, folderPath, status } = req.body ?? {};
+    if (!title) return void res.status(400).json({ error: 'title обовʼязковий' });
+    const created = await prisma.instruction.create({
+      data: {
+        companyId,
+        title: String(title),
+        postUnitId: postUnitId || null,
+        processId: processId || null,
+        driveDocId: driveDocId || null,
+        folderPath: folderPath || null,
+        status: status === 'ACTIVE' ? 'ACTIVE' : 'DRAFT',
+      },
+      include: instructionInclude,
+    });
+    await logChange(companyId, 'instruction', 'create', `Створено інструкцію: ${title}`, req.body?.author);
+    await queueInstructionIndexing(created.id);
+    res.json({ instruction: shapeInstruction(created) });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+api.patch('/instruction-records/:id', async (req, res) => {
+  try {
+    const existing = await prisma.instruction.findUnique({ where: { id: req.params.id }, select: { companyId: true } });
+    if (!existing) return void res.status(404).json({ error: 'Інструкцію не знайдено' });
+    const { title, postUnitId, processId, driveDocId, folderPath, status } = req.body ?? {};
+    // Зміна назви/змісту/статусу піднімає версію
+    const bumpVersion = title !== undefined || driveDocId !== undefined || status !== undefined;
+    const updated = await prisma.instruction.update({
+      where: { id: req.params.id },
+      data: {
+        ...(title !== undefined && { title: String(title) }),
+        ...(postUnitId !== undefined && { postUnitId: postUnitId || null }),
+        ...(processId !== undefined && { processId: processId || null }),
+        ...(driveDocId !== undefined && { driveDocId: driveDocId || null }),
+        ...(folderPath !== undefined && { folderPath: folderPath || null }),
+        ...(status !== undefined && { status: status === 'ACTIVE' ? 'ACTIVE' : 'DRAFT' }),
+        ...(bumpVersion && { version: { increment: 1 } }),
+      },
+      include: instructionInclude,
+    });
+    await logChange(existing.companyId, 'instruction', 'update', `Оновлено інструкцію: ${updated.title}`, req.body?.author);
+    await queueInstructionIndexing(updated.id);
+    res.json({ instruction: shapeInstruction(updated) });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+api.delete('/instruction-records/:id', async (req, res) => {
+  try {
+    const existing = await prisma.instruction.findUnique({ where: { id: req.params.id }, select: { companyId: true, title: true } });
+    if (!existing) return void res.status(404).json({ error: 'Інструкцію не знайдено' });
+    await prisma.instruction.delete({ where: { id: req.params.id } });
+    await logChange(existing.companyId, 'instruction', 'delete', `Видалено інструкцію: ${existing.title}`, req.body?.author);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+// Звʼязок інструкція↔інструкція (основа розповсюдження змін #224)
+api.post('/instruction-records/:id/links', async (req, res) => {
+  try {
+    const { relatedInstructionId, relationType, weight } = req.body ?? {};
+    if (!relatedInstructionId) return void res.status(400).json({ error: 'relatedInstructionId обовʼязковий' });
+    if (relatedInstructionId === req.params.id) return void res.status(422).json({ error: 'не можна лінкувати саму на себе' });
+    const link = await prisma.instructionLink.upsert({
+      where: { instructionId_relatedInstructionId: { instructionId: req.params.id, relatedInstructionId } },
+      create: { instructionId: req.params.id, relatedInstructionId, relationType: relationType || null, weight: typeof weight === 'number' ? weight : 1 },
+      update: { relationType: relationType || null, ...(typeof weight === 'number' ? { weight } : {}) },
+    });
+    res.json({ link });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
 // ── Редагування процесів ──────────────────────────────────
 api.post('/companies/:id/processes', async (req, res) => {
   try {
