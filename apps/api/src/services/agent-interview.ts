@@ -11,6 +11,23 @@ type Params = Record<string, unknown>;
 const S = (v: unknown): string => (v == null ? '' : String(v)).trim();
 const arr = (v: unknown): any[] => (Array.isArray(v) ? v : []);
 
+// #279 Синхронність: створити PENDING-пропозицію (людина підтверджує inline).
+async function fireProposal(
+  companyId: string,
+  type: 'INSTRUCTION_EDIT' | 'NEW_DOC' | 'STRUCTURE_CHANGE',
+  payload: Record<string, unknown>,
+  targetInstructionId?: string | null,
+): Promise<boolean> {
+  try {
+    await prisma.proposal.create({
+      data: { companyId, type, payload: payload as object, targetInstructionId: targetInstructionId ?? null },
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** Стадія 0 — власник, бачення, ЦКП компанії, власники. Створює/оновлює Company. */
 async function interviewStart(p: Params, ctx: AgentContext): Promise<AgentResult> {
   const name = S(p.name) || 'Нова компанія';
@@ -154,6 +171,7 @@ async function interviewPosts(p: Params, ctx: AgentContext): Promise<AgentResult
 
   let created = 0;
   let membersLinked = 0;
+  let proposals = 0;
   for (const it of arr(p.posts)) {
     const ps = it as Params;
     const title = S(ps.title);
@@ -176,6 +194,8 @@ async function interviewPosts(p: Params, ctx: AgentContext): Promise<AgentResult
         select: { id: true },
       });
       created++;
+      // #279: нова посада → пропозиція згенерувати посадову інструкцію
+      if (await fireProposal(companyId, 'NEW_DOC', { postUnitId: post.id, title: `Посадова інструкція: ${title}`, reason: 'new_post_created' })) proposals++;
     } else if (holderName) {
       await prisma.orgUnit.update({ where: { id: post.id }, data: { holderName, isVacant: false } });
     }
@@ -192,7 +212,11 @@ async function interviewPosts(p: Params, ctx: AgentContext): Promise<AgentResult
 
   return {
     companyId,
-    reply: [`✅ Стадія 3: посад додано — ${created}, призначень людей — ${membersLinked}.`, 'Далі — Стадія 4: ключові бізнес-процеси (потоки цінності).'].join('\n'),
+    reply: [
+      `✅ Стадія 3: посад додано — ${created}, призначень людей — ${membersLinked}.`,
+      proposals ? `📝 ${proposals} пропозицій інструкцій чекають підтвердження.` : '',
+      'Далі — Стадія 4: ключові бізнес-процеси (потоки цінності).',
+    ].filter(Boolean).join('\n'),
   };
 }
 
@@ -202,24 +226,48 @@ async function interviewProcesses(p: Params, ctx: AgentContext): Promise<AgentRe
   if (!companyId) return { reply: 'Спершу Стадія 0.' };
 
   let created = 0;
+  let proposals = 0;
   for (const it of arr(p.processes)) {
     const pr = it as Params;
     const name = S(pr.name);
     if (!name) continue;
     const exists = await prisma.process.findFirst({ where: { companyId, name }, select: { id: true } });
     if (exists) continue;
+    const steps = arr(pr.steps);
     await prisma.process.create({
       data: {
         companyId, name, description: S(pr.description) || null,
-        steps: (arr(pr.steps) as unknown as object) ?? undefined,
+        steps: (steps as unknown as object) ?? undefined,
       },
     });
     created++;
+
+    // #279: кожен крок процесу зі згаданою посадою → пропозиція відобразити крок
+    // у посадовій інструкції відповідальної посади.
+    const seen = new Set<string>();
+    for (const step of steps) {
+      const postTitle = S((step as Params).post);
+      if (!postTitle || seen.has(postTitle)) continue;
+      seen.add(postTitle);
+      const post = await prisma.orgUnit.findFirst({ where: { companyId, type: 'POST', name: postTitle }, select: { id: true } });
+      if (!post) continue;
+      const instr = await prisma.instruction.findFirst({ where: { companyId, postUnitId: post.id }, select: { id: true } });
+      const ok = await fireProposal(
+        companyId, 'INSTRUCTION_EDIT',
+        { postUnitId: post.id, processName: name, reason: 'process_step_added', step },
+        instr?.id ?? null,
+      );
+      if (ok) proposals++;
+    }
   }
 
   return {
     companyId,
-    reply: [`✅ Стадія 4: процесів додано — ${created}.`, 'Далі — Стадія 5: чернетки посадових інструкцій для посад.'].join('\n'),
+    reply: [
+      `✅ Стадія 4: процесів додано — ${created}.`,
+      proposals ? `📝 ${proposals} пропозицій оновити інструкції посад чекають підтвердження.` : '',
+      'Далі — Стадія 5: чернетки посадових інструкцій для посад.',
+    ].filter(Boolean).join('\n'),
   };
 }
 
