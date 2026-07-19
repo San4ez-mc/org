@@ -15,6 +15,7 @@ export async function GET(req: NextRequest) {
   const savedState = cookies().get('sso_state')?.value ?? '';
 
   if (!code || !state || state !== savedState) {
+    console.error('[sso callback] state/code перевірка не пройдена', { hasCode: !!code, hasState: !!state, stateMatch: state === savedState });
     return NextResponse.redirect(`${base}/login?e=sso`);
   }
 
@@ -31,7 +32,10 @@ export async function GET(req: NextRequest) {
       }),
       cache: 'no-store',
     });
-    if (!tokenRes.ok) return NextResponse.redirect(`${base}/login?e=sso`);
+    if (!tokenRes.ok) {
+      console.error('[sso callback] обмін токена не вдався', tokenRes.status, await tokenRes.text().catch(() => ''));
+      return NextResponse.redirect(`${base}/login?e=sso`);
+    }
     const data = (await tokenRes.json()) as { user?: { email?: string; name?: string } };
 
     const res = NextResponse.redirect(`${base}/`);
@@ -52,7 +56,8 @@ export async function GET(req: NextRequest) {
     }
     res.cookies.set('sso_state', '', { path: '/', maxAge: 0 });
     return res;
-  } catch {
+  } catch (err) {
+    console.error('[sso callback] виняток (SSO недоступний?):', err);
     return NextResponse.redirect(`${base}/login?e=sso`);
   }
 }
