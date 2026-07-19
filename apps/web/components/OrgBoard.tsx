@@ -1,5 +1,6 @@
 'use client';
-import { useState, useTransition } from 'react';
+import { useRef, useState, useTransition } from 'react';
+import { toPng, toSvg } from 'html-to-image';
 import type { OrgUnit, Member } from '@/lib/api';
 import { updateOrgUnit, addPost, deleteUnit } from '@/app/company/[id]/actions';
 
@@ -10,6 +11,28 @@ const PAEI_COLOR: Record<string, string> = { P: '#e07a7a', A: '#7a93d6', E: '#6b
 export default function OrgBoard({ units, members, companyId }: { units: OrgUnit[]; members: Member[]; companyId: string }) {
   const [scale, setScale] = useState(1);
   const [showPeople, setShowPeople] = useState(true);
+  const boardRef = useRef<HTMLDivElement>(null);
+  const [exporting, setExporting] = useState(false);
+
+  // #201 Експорт борду у PNG/SVG (клієнтський — з реального DOM зі стилями).
+  async function exportBoard(kind: 'png' | 'svg') {
+    const node = boardRef.current;
+    if (!node) return;
+    setExporting(true);
+    try {
+      const bg = getComputedStyle(document.body).backgroundColor || '#0d1117';
+      const opts = { backgroundColor: bg, cacheBust: true, pixelRatio: 2 };
+      const dataUrl = kind === 'png' ? await toPng(node, opts) : await toSvg(node, opts);
+      const a = document.createElement('a');
+      a.href = dataUrl;
+      a.download = `org-structure.${kind}`;
+      a.click();
+    } catch (e) {
+      alert('Не вдалося експортувати: ' + (e as Error).message);
+    } finally {
+      setExporting(false);
+    }
+  }
 
   const divisions = units.filter((u) => u.type === 'DIVISION');
   const byBoard = (n: number) => divisions.find((d) => d.boardNo === n);
@@ -70,6 +93,8 @@ export default function OrgBoard({ units, members, companyId }: { units: OrgUnit
         <span style={{ fontSize: 13, color: 'hsl(var(--muted-foreground))', width: 44, textAlign: 'center' }}>{Math.round(scale * 100)}%</span>
         <button style={btn} onClick={() => setScale((s) => Math.min(1.6, +(s + 0.1).toFixed(2)))} title="Збільшити">+</button>
         <button style={{ ...btn, width: 'auto', padding: '0 10px', fontSize: 12 }} onClick={() => setScale(1)}>Скинути</button>
+        <button style={{ ...btn, width: 'auto', padding: '0 10px', fontSize: 12 }} disabled={exporting} onClick={() => exportBoard('png')} title="Експорт у PNG">{exporting ? '…' : 'PNG'}</button>
+        <button style={{ ...btn, width: 'auto', padding: '0 10px', fontSize: 12 }} disabled={exporting} onClick={() => exportBoard('svg')} title="Експорт у SVG">SVG</button>
         <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'hsl(var(--muted-foreground))', cursor: 'pointer' }}>
           <input type="checkbox" checked={showPeople} onChange={(e) => setShowPeople(e.target.checked)} /> показувати людей
         </label>
@@ -85,6 +110,7 @@ export default function OrgBoard({ units, members, companyId }: { units: OrgUnit
 
       <div style={{ overflow: 'auto', border: '1px solid hsl(var(--border))', borderRadius: 'var(--radius)', background: 'hsl(var(--background))', padding: 16 }}>
         <div style={{ transform: `scale(${scale})`, transformOrigin: 'top left', width: 'max-content', transition: 'transform 0.12s' }}>
+          <div ref={boardRef} style={{ width: 'max-content', background: 'hsl(var(--background))', padding: 4 }}>
           {leadership.length > 0 && (
             <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 20 }}>
               <div style={{ background: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: 10, padding: '10px 18px', textAlign: 'center' }}>
@@ -144,6 +170,7 @@ export default function OrgBoard({ units, members, companyId }: { units: OrgUnit
                 </div>
               );
             })}
+          </div>
           </div>
         </div>
       </div>
