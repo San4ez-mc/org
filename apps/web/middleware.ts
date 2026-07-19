@@ -4,7 +4,7 @@ import type { NextRequest } from 'next/server';
 // Захист усіх сторінок сесійним cookie. /login — відкритий.
 export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
-  if (pathname.startsWith('/login') || pathname.startsWith('/me')) return NextResponse.next();
+  if (pathname.startsWith('/login') || pathname.startsWith('/me') || pathname.startsWith('/auth/')) return NextResponse.next();
   const token = req.cookies.get('org_session')?.value;
   if (token && token === process.env.AUTH_TOKEN) return NextResponse.next();
   const url = req.nextUrl.clone();

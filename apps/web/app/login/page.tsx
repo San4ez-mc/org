@@ -15,10 +15,16 @@ export default function LoginPage({ searchParams }: { searchParams: { e?: string
           placeholder="Пароль"
           style={{ width: '100%', background: 'hsl(var(--background))', border: '1px solid hsl(var(--border))', borderRadius: 8, padding: '9px 12px', color: 'inherit', fontSize: 14, marginBottom: 12 }}
         />
-        {searchParams.e && <div style={{ fontSize: 12, color: '#e07a7a', marginBottom: 10 }}>Невірний пароль</div>}
+        {searchParams.e === '1' && <div style={{ fontSize: 12, color: '#e07a7a', marginBottom: 10 }}>Невірний пароль</div>}
+        {searchParams.e === 'sso' && <div style={{ fontSize: 12, color: '#e07a7a', marginBottom: 10 }}>Не вдалося увійти через FINEKO</div>}
         <button type="submit" style={{ width: '100%', background: 'hsl(var(--primary))', color: '#fff', border: 'none', borderRadius: 8, padding: '10px', fontSize: 14, cursor: 'pointer' }}>
           Увійти
         </button>
+
+        {/* Вхід через FINEKO SSO (#284) */}
+        <a href="/auth/sso" style={{ display: 'block', width: '100%', textAlign: 'center', color: 'hsl(var(--muted-foreground))', border: '1px solid hsl(var(--border))', borderRadius: 8, padding: '10px', fontSize: 14, marginTop: 10, textDecoration: 'none', boxSizing: 'border-box' }}>
+          Увійти через FINEKO
+        </a>
       </form>
     </div>
   );
