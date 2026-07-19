@@ -1,5 +1,6 @@
 'use client';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
+import { toPng } from 'html-to-image';
 import ReactFlow, {
   Background, Controls, MiniMap, Handle, Position, addEdge, useNodesState, useEdgesState,
   type Node, type Edge, type Connection, type NodeProps,
@@ -65,6 +66,27 @@ export default function ProcessCanvas({ companyId, process, postTitles, onClose 
   const [selEdge, setSelEdge] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
+  const paneRef = useRef<HTMLDivElement>(null);
+  const [exporting, setExporting] = useState(false);
+
+  // #203 Експорт схеми процесу у PNG (захоплюємо viewport ReactFlow — ноди/ребра, без контролів).
+  async function exportPng() {
+    const el = paneRef.current?.querySelector('.react-flow__viewport') as HTMLElement | null;
+    if (!el) return;
+    setExporting(true);
+    try {
+      const bg = getComputedStyle(document.body).backgroundColor || '#0d1117';
+      const dataUrl = await toPng(el, { backgroundColor: bg, cacheBust: true, pixelRatio: 2 });
+      const a = document.createElement('a');
+      a.href = dataUrl;
+      a.download = `process-${(process.name || 'schema').replace(/[^\w\-]+/g, '_').slice(0, 40)}.png`;
+      a.click();
+    } catch (e) {
+      alert('Не вдалося експортувати: ' + (e as Error).message);
+    } finally {
+      setExporting(false);
+    }
+  }
 
   const touch = () => setDirty(true);
   const onConnect = useCallback((c: Connection) => { setEdges((e) => addEdge({ ...c, id: `e-${Date.now()}` }, e)); touch(); }, [setEdges]);
@@ -104,11 +126,12 @@ export default function ProcessCanvas({ companyId, process, postTitles, onClose 
         <button style={ghost} onClick={() => addNode('end')}>+ кінець</button>
         <span style={{ flex: 1 }} />
         <button style={{ ...ghost, ...(dirty ? { borderColor: 'hsl(var(--primary))', color: 'hsl(var(--primary))' } : {}) }} disabled={saving || !dirty} onClick={save}>{saving ? '…' : dirty ? 'Зберегти схему' : 'Збережено'}</button>
+        <button style={ghost} disabled={exporting} onClick={exportPng} title="Експорт схеми у PNG">{exporting ? '…' : 'PNG'}</button>
         <button style={ghost} onClick={onClose}>Закрити</button>
       </div>
 
       <div style={{ display: 'flex', gap: 10 }}>
-        <div style={{ flex: 1, height: 460, border: '1px solid hsl(var(--border))', borderRadius: 8, overflow: 'hidden', background: 'hsl(var(--background))' }}>
+        <div ref={paneRef} style={{ flex: 1, height: 460, border: '1px solid hsl(var(--border))', borderRadius: 8, overflow: 'hidden', background: 'hsl(var(--background))' }}>
           <ReactFlow
             nodes={nodes} edges={edges} nodeTypes={nodeTypes}
             onNodesChange={(c) => { onNodesChange(c); if (c.some((x) => x.type === 'position' || x.type === 'remove')) touch(); }}
