@@ -2,7 +2,7 @@
 import { useRef, useState, useTransition } from 'react';
 import { toPng, toSvg } from 'html-to-image';
 import type { OrgUnit, Member } from '@/lib/api';
-import { updateOrgUnit, addPost, deleteUnit } from '@/app/company/[id]/actions';
+import { updateOrgUnit, addPost, deleteUnit, moveUnit } from '@/app/company/[id]/actions';
 
 const DIVISION_PAEI: Record<number, 'P' | 'A' | 'E' | 'I'> = { 7: 'E', 1: 'I', 2: 'E', 3: 'A', 4: 'P', 5: 'A', 6: 'I' };
 const BOARD_ORDER = [7, 1, 2, 3, 4, 5, 6];
@@ -13,6 +13,27 @@ export default function OrgBoard({ units, members, companyId }: { units: OrgUnit
   const [showPeople, setShowPeople] = useState(true);
   const boardRef = useRef<HTMLDivElement>(null);
   const [exporting, setExporting] = useState(false);
+
+  // #218 Drag&drop: перенесення посади в інший підрозділ.
+  const [draggedPost, setDraggedPost] = useState<{ id: string; parentId: string | null } | null>(null);
+  const [dropTarget, setDropTarget] = useState<string | null>(null);
+  const [, startMove] = useTransition();
+
+  function dropProps(targetId: string) {
+    return {
+      onDragOver: (e: React.DragEvent) => {
+        if (draggedPost && draggedPost.parentId !== targetId) { e.preventDefault(); setDropTarget(targetId); }
+      },
+      onDragLeave: () => setDropTarget((t) => (t === targetId ? null : t)),
+      onDrop: (e: React.DragEvent) => {
+        e.preventDefault();
+        const dp = draggedPost;
+        setDropTarget(null);
+        setDraggedPost(null);
+        if (dp && dp.parentId !== targetId) startMove(() => moveUnit(companyId, dp.id, targetId));
+      },
+    };
+  }
 
   // #201 Експорт борду у PNG/SVG (клієнтський — з реального DOM зі стилями).
   async function exportBoard(kind: 'png' | 'svg') {
@@ -51,7 +72,13 @@ export default function OrgBoard({ units, members, companyId }: { units: OrgUnit
     const people = peopleOf(p.id);
     const [, startDel] = useTransition();
     return (
-      <div style={{ fontSize: 11.5, background: 'hsl(var(--muted))', borderRadius: 6, padding: '3px 7px', marginBottom: 4, display: 'flex', justifyContent: 'space-between', gap: 6 }}>
+      <div
+        draggable
+        onDragStart={() => setDraggedPost({ id: p.id, parentId: p.parentId ?? null })}
+        onDragEnd={() => { setDraggedPost(null); setDropTarget(null); }}
+        title="Перетягни в інший підрозділ"
+        style={{ fontSize: 11.5, background: 'hsl(var(--muted))', borderRadius: 6, padding: '3px 7px', marginBottom: 4, display: 'flex', justifyContent: 'space-between', gap: 6, cursor: 'grab', opacity: draggedPost?.id === p.id ? 0.4 : 1 }}
+      >
         <span>
           {p.name}
           {showPeople && <span style={{ color: 'hsl(var(--muted-foreground))' }}> · {people.length ? people.join(', ') : 'вакансія'}</span>}
@@ -148,7 +175,7 @@ export default function OrgBoard({ units, members, companyId }: { units: OrgUnit
                     {depts.map((dep) => {
                       const dPosts = childrenOf(dep.id, 'POST');
                       return (
-                        <div key={dep.id} style={{ background: 'hsl(var(--background))', border: '1px solid hsl(var(--border))', borderRadius: 8, padding: 8 }}>
+                        <div key={dep.id} {...dropProps(dep.id)} style={{ background: 'hsl(var(--background))', border: `1px solid ${dropTarget === dep.id ? 'hsl(var(--primary))' : 'hsl(var(--border))'}`, boxShadow: dropTarget === dep.id ? '0 0 0 1px hsl(var(--primary))' : 'none', borderRadius: 8, padding: 8 }}>
                           <Editable companyId={companyId} unitId={dep.id} field="name" value={dep.name} />
                           <Editable companyId={companyId} unitId={dep.id} field="ckp" value={dep.ckp ?? ''} prefix="ЦКП: " small />
                           <div style={{ marginTop: 4 }}>
@@ -160,13 +187,11 @@ export default function OrgBoard({ units, members, companyId }: { units: OrgUnit
                     })}
                   </div>
 
-                  {posts.length > 0 && (
-                    <div style={{ marginTop: 10 }}>
-                      <div style={{ fontSize: 10, color: 'hsl(var(--muted-foreground))', marginBottom: 4 }}>Посади:</div>
-                      {posts.map((p) => <PostChip key={p.id} p={p} />)}
-                      <AddPost parentId={d.id} />
-                    </div>
-                  )}
+                  <div {...dropProps(d.id)} style={{ marginTop: 10, borderRadius: 8, padding: dropTarget === d.id ? 6 : 0, border: dropTarget === d.id ? '1px solid hsl(var(--primary))' : '1px solid transparent' }}>
+                    {posts.length > 0 && <div style={{ fontSize: 10, color: 'hsl(var(--muted-foreground))', marginBottom: 4 }}>Посади:</div>}
+                    {posts.map((p) => <PostChip key={p.id} p={p} />)}
+                    <AddPost parentId={d.id} />
+                  </div>
                 </div>
               );
             })}

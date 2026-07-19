@@ -738,8 +738,22 @@ api.get('/members/by-telegram/:tgId', async (req, res) => {
 // ── Редагування орг-одиниць ───────────────────────────────
 api.patch('/org-units/:id', async (req, res) => {
   try {
-    const { name, ckp, unitStatus, salary } = req.body ?? {};
+    const { name, ckp, unitStatus, salary, parentId } = req.body ?? {};
     const validStatus = ['CURRENT', 'PLANNED', 'TESTING', 'DEPRECATED'];
+
+    // #218 Переміщення (drag&drop): зміна батька. Новий батько має бути в тій самій
+    // компанії й не самим вузлом (щоб уникнути циклів у простому випадку — POST не має дітей).
+    let moveData: { parentId?: string } = {};
+    if (parentId !== undefined && parentId !== null) {
+      const current = await prisma.orgUnit.findUnique({ where: { id: req.params.id }, select: { companyId: true, id: true } });
+      const parent = await prisma.orgUnit.findUnique({ where: { id: String(parentId) }, select: { companyId: true, id: true } });
+      if (!current || !parent || parent.companyId !== current.companyId) {
+        return void res.status(400).json({ error: 'Некоректний новий підрозділ' });
+      }
+      if (parent.id === current.id) return void res.status(422).json({ error: 'Не можна перемістити у себе' });
+      moveData = { parentId: parent.id };
+    }
+
     const unit = await prisma.orgUnit.update({
       where: { id: req.params.id },
       data: {
@@ -747,9 +761,11 @@ api.patch('/org-units/:id', async (req, res) => {
         ...(ckp !== undefined && { ckp }),
         ...(unitStatus !== undefined && validStatus.includes(unitStatus) && { unitStatus }), // #217
         ...(salary !== undefined && { salary: salary === null || salary === '' ? null : Number(salary) }), // #198
+        ...moveData,
       },
     });
-    await logChange(unit.companyId, 'structure', 'update', `Оновлено «${unit.name}»${ckp !== undefined ? ' (ЦКП)' : ''}`, req.body?.author, unit.id);
+    const changeMsg = moveData.parentId ? `Переміщено «${unit.name}» в інший підрозділ` : `Оновлено «${unit.name}»${ckp !== undefined ? ' (ЦКП)' : ''}`;
+    await logChange(unit.companyId, 'structure', 'update', changeMsg, req.body?.author, unit.id);
     res.json({ unit });
   } catch (err) {
     res.status(500).json({ error: String(err) });

@@ -57,6 +57,13 @@ export async function addPost(companyId: string, parentId: string, name: string)
   revalidatePath(`/company/${companyId}`);
 }
 
+// #218 Перемістити посаду в інший підрозділ (drag&drop)
+export async function moveUnit(companyId: string, unitId: string, parentId: string) {
+  await call(`/org-units/${unitId}`, 'PATCH', { parentId, author: 'пульт' });
+  revalidatePath(`/company/${companyId}/structure`);
+  revalidatePath(`/company/${companyId}`);
+}
+
 export async function deleteUnit(companyId: string, unitId: string) {
   await call(`/org-units/${unitId}`, 'DELETE', { author: 'пульт' });
   revalidatePath(`/company/${companyId}/structure`);
