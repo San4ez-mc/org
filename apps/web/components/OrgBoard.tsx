@@ -1,14 +1,46 @@
 'use client';
 import { useRef, useState, useTransition } from 'react';
 import { toPng, toSvg } from 'html-to-image';
-import type { OrgUnit, Member } from '@/lib/api';
+import type { OrgUnit, Member, Statistic } from '@/lib/api';
 import { updateOrgUnit, addPost, deleteUnit, moveUnit } from '@/app/company/[id]/actions';
+
+// #214 Міні-графік тренду статистики на картці одиниці.
+function Sparkline({ stat }: { stat: Statistic }) {
+  const pts = (stat.points || []).filter((p) => typeof p.value === 'number');
+  if (pts.length < 2) return null;
+  const w = 84, h = 22, pad = 2;
+  const vals = pts.map((p) => p.value);
+  const min = Math.min(...vals), max = Math.max(...vals);
+  const span = max - min || 1;
+  const coords = pts.map((p, i) => {
+    const x = pad + (i / (pts.length - 1)) * (w - pad * 2);
+    const y = h - pad - ((p.value - min) / span) * (h - pad * 2);
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  });
+  const up = vals[vals.length - 1] >= vals[0];
+  const good = up === stat.higherIsBetter;
+  const color = good ? '#6bbf72' : '#e07a7a';
+  const last = pts[pts.length - 1].value;
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4 }} title={`${stat.name}: ${last}${stat.unit ? ' ' + stat.unit : ''}`}>
+      <svg width={w} height={h} style={{ flex: '0 0 auto' }}>
+        <polyline points={coords.join(' ')} fill="none" stroke={color} strokeWidth={1.5} strokeLinejoin="round" strokeLinecap="round" />
+        <circle cx={coords[coords.length - 1].split(',')[0]} cy={coords[coords.length - 1].split(',')[1]} r={2} fill={color} />
+      </svg>
+      <span style={{ fontSize: 10, color: 'hsl(var(--muted-foreground))', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+        {stat.name}: <b style={{ color }}>{last}{stat.unit ? ` ${stat.unit}` : ''}</b>
+      </span>
+    </div>
+  );
+}
 
 const DIVISION_PAEI: Record<number, 'P' | 'A' | 'E' | 'I'> = { 7: 'E', 1: 'I', 2: 'E', 3: 'A', 4: 'P', 5: 'A', 6: 'I' };
 const BOARD_ORDER = [7, 1, 2, 3, 4, 5, 6];
 const PAEI_COLOR: Record<string, string> = { P: '#e07a7a', A: '#7a93d6', E: '#6bbf72', I: '#d6b84f' };
 
-export default function OrgBoard({ units, members, companyId }: { units: OrgUnit[]; members: Member[]; companyId: string }) {
+export default function OrgBoard({ units, members, companyId, statistics = [] }: { units: OrgUnit[]; members: Member[]; companyId: string; statistics?: Statistic[] }) {
+  // статистики за одиницею (перша на одиницю — для sparkline на картці)
+  const statOf = (unitId: string) => statistics.find((s) => s.orgUnitId === unitId);
   const [scale, setScale] = useState(1);
   const [showPeople, setShowPeople] = useState(true);
   const boardRef = useRef<HTMLDivElement>(null);
@@ -170,6 +202,7 @@ export default function OrgBoard({ units, members, companyId }: { units: OrgUnit
                     <span className={`paei-${role}`} style={{ fontSize: 10, padding: '1px 6px', borderRadius: 5 }}>{role}</span>
                   </div>
                   <Editable companyId={companyId} unitId={d.id} field="ckp" value={d.ckp ?? ''} prefix="ЦКП: " small />
+                  {statOf(d.id) && <Sparkline stat={statOf(d.id)!} />}
 
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 8 }}>
                     {depts.map((dep) => {
@@ -178,6 +211,7 @@ export default function OrgBoard({ units, members, companyId }: { units: OrgUnit
                         <div key={dep.id} {...dropProps(dep.id)} style={{ background: 'hsl(var(--background))', border: `1px solid ${dropTarget === dep.id ? 'hsl(var(--primary))' : 'hsl(var(--border))'}`, boxShadow: dropTarget === dep.id ? '0 0 0 1px hsl(var(--primary))' : 'none', borderRadius: 8, padding: 8 }}>
                           <Editable companyId={companyId} unitId={dep.id} field="name" value={dep.name} />
                           <Editable companyId={companyId} unitId={dep.id} field="ckp" value={dep.ckp ?? ''} prefix="ЦКП: " small />
+                          {statOf(dep.id) && <Sparkline stat={statOf(dep.id)!} />}
                           <div style={{ marginTop: 4 }}>
                             {dPosts.map((p) => <PostChip key={p.id} p={p} />)}
                             <AddPost parentId={dep.id} />
