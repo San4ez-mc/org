@@ -12,6 +12,7 @@ import {
 } from '@platform/ai';
 import { CANONICAL_DIVISIONS } from '@platform/org-template';
 import { knowledgeContextFor } from './knowledge';
+import { isInterviewAction, handleInterviewStage } from './agent-interview';
 
 export interface AgentIntent {
   action: string;
@@ -38,6 +39,11 @@ function nowStamp(): string {
  * решта дій — заглушки з тим самим контрактом, додаються далі.
  */
 export async function handleAct(intent: AgentIntent, ctx: AgentContext): Promise<AgentResult> {
+  // #277 Стадійне інтервʼю (Стадії 0–5) — інкрементальна побудова
+  if (isInterviewAction(intent.action)) {
+    return handleInterviewStage(intent.action, intent.params ?? {}, ctx);
+  }
+
   switch (intent.action) {
     case 'onboarding_generate':
       return onboardingGenerate((intent.params ?? {}) as OnboardingAnswers, ctx);
