@@ -117,7 +117,7 @@ export async function getStatistics(companyId: string): Promise<Statistic[]> {
 }
 
 export interface MeSummary {
-  member: { id: string; firstName: string; lastName: string | null; role: string };
+  member: { id: string; firstName: string; lastName: string | null; role: string; telegramUsername?: string | null; email?: string | null; birthDate?: string | null; photoUrl?: string | null };
   company: { id: string; name: string } | null;
   posts: { id: string; name: string; ckp: string | null; path: string[] }[];
   processes: { id: string; name: string; description: string | null; steps: ProcessStep[] | null }[];

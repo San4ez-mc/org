@@ -1,4 +1,5 @@
 import { getMe } from '@/lib/api';
+import MyProfileForm from '@/components/MyProfileForm';
 
 export const dynamic = 'force-dynamic';
 
@@ -24,6 +25,9 @@ export default async function MePage({ params }: { params: { token: string } }) 
         <div style={{ fontSize: 13, ...muted }}>{me.company?.name} · Моя робота</div>
         <h1 style={{ fontSize: 22, fontWeight: 700, marginTop: 2 }}>👋 {fullName}</h1>
       </div>
+
+      {/* #236 Самореєстрація: доповнити власний профіль */}
+      <MyProfileForm token={params.token} member={me.member} />
 
       {/* Мої посади + ЦКП */}
       <section style={{ marginBottom: 18 }}>

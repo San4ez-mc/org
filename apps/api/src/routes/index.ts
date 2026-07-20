@@ -666,7 +666,7 @@ api.get('/members/:id/card', async (req, res) => {
 });
 
 // ── Портал працівника (персональна зведена інформація) ─────
-type MemberWithPosts = { id: string; firstName: string; lastName: string | null; role: string; companyId: string; posts: { postUnitId: string }[] };
+type MemberWithPosts = { id: string; firstName: string; lastName: string | null; role: string; companyId: string; telegramUsername?: string | null; email?: string | null; birthDate?: Date | null; photoUrl?: string | null; posts: { postUnitId: string }[] };
 
 async function buildMemberSummary(member: MemberWithPosts) {
   const postUnitIds = member.posts.map((p) => p.postUnitId);
@@ -715,7 +715,12 @@ async function buildMemberSummary(member: MemberWithPosts) {
   }
 
   return {
-    member: { id: member.id, firstName: member.firstName, lastName: member.lastName, role: member.role },
+    member: {
+      id: member.id, firstName: member.firstName, lastName: member.lastName, role: member.role,
+      telegramUsername: member.telegramUsername ?? null, email: member.email ?? null,
+      birthDate: member.birthDate ? new Date(member.birthDate).toISOString().slice(0, 10) : null,
+      photoUrl: member.photoUrl ?? null,
+    },
     company: company ? { id: company.id, name: company.name } : null,
     posts: units.map((u) => ({ id: u.id, name: u.name, ckp: u.ckp, path: ancestors(u) })),
     processes: processes.map((pr) => ({ id: pr.id, name: pr.name, description: pr.description, steps: pr.steps })),
@@ -744,6 +749,31 @@ api.get('/me/:token', async (req, res) => {
     const member = await prisma.member.findUnique({ where: { accessToken: req.params.token }, include: { posts: { where: { removedAt: null } } } });
     if (!member) return res.status(404).json({ error: 'not found' });
     res.json({ summary: await buildMemberSummary(member) });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+// #236 Самореєстрація: працівник оновлює ВЛАСНИЙ профіль за токеном.
+// Дозволені лише self-поля (не роль/статус/посади — то тільки адмін через /members/:id).
+api.patch('/me/:token', async (req, res) => {
+  try {
+    const member = await prisma.member.findUnique({ where: { accessToken: req.params.token }, select: { id: true } });
+    if (!member) return void res.status(404).json({ error: 'not found' });
+    const { firstName, lastName, telegramUsername, email, birthDate, photoUrl } = req.body ?? {};
+    const updated = await prisma.member.update({
+      where: { id: member.id },
+      data: {
+        ...(firstName !== undefined && String(firstName).trim() && { firstName: String(firstName).trim() }),
+        ...(lastName !== undefined && { lastName: String(lastName).trim() || null }),
+        ...(telegramUsername !== undefined && { telegramUsername: String(telegramUsername).trim().replace(/^@/, '') || null }),
+        ...(email !== undefined && { email: String(email).trim() || null }),
+        ...(birthDate !== undefined && { birthDate: birthDate ? new Date(birthDate) : null }),
+        ...(photoUrl !== undefined && { photoUrl: String(photoUrl).trim() || null }),
+      },
+      include: { posts: { where: { removedAt: null } } },
+    });
+    res.json({ summary: await buildMemberSummary(updated) });
   } catch (err) {
     res.status(500).json({ error: String(err) });
   }
