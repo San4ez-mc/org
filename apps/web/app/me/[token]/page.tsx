@@ -44,6 +44,21 @@ export default async function MePage({ params }: { params: { token: string } }) 
         </div>
       </section>
 
+      {/* Моя команда (для керівника відділу) — #238 */}
+      {me.team && me.team.length > 0 && (
+        <section style={{ marginBottom: 18 }}>
+          <h2 style={{ fontSize: 14, fontWeight: 600, margin: '0 0 8px' }}>Моя команда ({me.team.length})</h2>
+          <div style={{ display: 'grid', gap: 8, gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))' }}>
+            {me.team.map((t) => (
+              <div key={t.id} style={card}>
+                <div style={{ fontSize: 14, fontWeight: 600 }}>{t.name}</div>
+                {t.posts.length > 0 && <div style={{ fontSize: 12, ...muted, marginTop: 2 }}>{t.posts.join(', ')}</div>}
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
       {/* Мої статистики */}
       {me.statistics.length > 0 && (
         <section style={{ marginBottom: 18 }}>

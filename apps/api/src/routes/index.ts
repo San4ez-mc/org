@@ -690,6 +690,30 @@ async function buildMemberSummary(member: MemberWithPosts) {
     while (p) { names.unshift(p.name); p = p.parent ?? null; }
     return names;
   };
+
+  // #238 Ролі: HEAD/OWNER бачать команду свого підрозділу (EMPLOYEE — лише себе).
+  let team: { id: string; name: string; posts: string[] }[] = [];
+  if (member.role === 'HEAD' || member.role === 'OWNER') {
+    // підрозділи, якими керує ця людина = батьки її посад (відділ/відділення/секція)
+    const deptIds = Array.from(new Set(
+      units
+        .map((u) => u.parent)
+        .filter((p): p is NonNullable<typeof p> => !!p && ['DEPARTMENT', 'DIVISION', 'SECTION'].includes(p.type))
+        .map((p) => p.id),
+    ));
+    if (deptIds.length) {
+      const teamPosts = await prisma.orgUnit.findMany({ where: { companyId: member.companyId, type: 'POST', parentId: { in: deptIds } }, select: { id: true } });
+      const teamPostIds = teamPosts.map((p) => p.id);
+      if (teamPostIds.length) {
+        const teamMembers = await prisma.member.findMany({
+          where: { companyId: member.companyId, id: { not: member.id }, status: 'EMPLOYED', posts: { some: { postUnitId: { in: teamPostIds }, removedAt: null } } },
+          select: { id: true, firstName: true, lastName: true, posts: { where: { removedAt: null, postUnitId: { in: teamPostIds } }, select: { postUnit: { select: { name: true } } } } },
+        });
+        team = teamMembers.map((m) => ({ id: m.id, name: `${m.firstName} ${m.lastName ?? ''}`.trim(), posts: m.posts.map((p) => p.postUnit.name) }));
+      }
+    }
+  }
+
   return {
     member: { id: member.id, firstName: member.firstName, lastName: member.lastName, role: member.role },
     company: company ? { id: company.id, name: company.name } : null,
@@ -697,6 +721,7 @@ async function buildMemberSummary(member: MemberWithPosts) {
     processes: processes.map((pr) => ({ id: pr.id, name: pr.name, description: pr.description, steps: pr.steps })),
     statistics,
     instructions: instructions.map((i) => ({ id: i.id, title: i.title, driveDocId: i.driveDocId, folderPath: i.folderPath, status: i.status })),
+    team,
   };
 }
 

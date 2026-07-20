@@ -122,6 +122,7 @@ export interface MeSummary {
   posts: { id: string; name: string; ckp: string | null; path: string[] }[];
   processes: { id: string; name: string; description: string | null; steps: ProcessStep[] | null }[];
   statistics: Statistic[];
+  team?: { id: string; name: string; posts: string[] }[];
 }
 
 export async function getMe(token: string): Promise<MeSummary | null> {
