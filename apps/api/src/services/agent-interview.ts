@@ -233,7 +233,12 @@ async function interviewProcesses(p: Params, ctx: AgentContext): Promise<AgentRe
     if (!name) continue;
     const exists = await prisma.process.findFirst({ where: { companyId, name }, select: { id: true } });
     if (exists) continue;
-    const steps = arr(pr.steps);
+    // Нормалізуємо кроки у канонічну форму { postTitle, action, result } — так їх читають
+    // борд, портал працівника і ProcessCanvas (вхід може мати ключ post або postTitle).
+    const steps = arr(pr.steps).map((s) => {
+      const st = s as Params;
+      return { postTitle: S(st.postTitle) || S(st.post), action: S(st.action), result: S(st.result) };
+    });
     await prisma.process.create({
       data: {
         companyId, name, description: S(pr.description) || null,
@@ -246,7 +251,7 @@ async function interviewProcesses(p: Params, ctx: AgentContext): Promise<AgentRe
     // у посадовій інструкції відповідальної посади.
     const seen = new Set<string>();
     for (const step of steps) {
-      const postTitle = S((step as Params).post);
+      const postTitle = step.postTitle;
       if (!postTitle || seen.has(postTitle)) continue;
       seen.add(postTitle);
       const post = await prisma.orgUnit.findFirst({ where: { companyId, type: 'POST', name: postTitle }, select: { id: true } });
