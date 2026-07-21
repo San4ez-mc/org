@@ -5,6 +5,7 @@ import { findFolderByName, listFolderTree } from '@platform/drive';
 import { stepsToMermaid } from '@platform/ai';
 import { requireApiSecret } from '../middleware/auth';
 import { handleAct } from '../services/agent';
+import { indexInstruction, findRelatedInstructions, vectorEnabled } from '../services/vector';
 
 /**
  * Контракт API платформи (§8 PLAN_PHASE1.md).
@@ -1123,11 +1124,40 @@ function shapeInstruction(r: any) {
   };
 }
 
-// Гачок індексації у вектор-мікросервіс (#263/#280). Поки заглушка: реальний виклик
-// зʼявиться, коли буде мапа компанія→проєкт/токен вектор-сервісу. Не блокує запис.
-async function queueInstructionIndexing(_instructionId: string): Promise<void> {
-  // TODO(#263): POST {VECTOR_SERVICE_URL}/ingest — driveDocId + чанки за токеном компанії.
-  return;
+// Пошуковий текст інструкції (для вектора): заголовок + посада + ЦКП + процеси.
+// Локально тіло інструкції — на Drive; тут беремо структуровані сигнали з БД.
+async function buildInstructionText(instructionId: string): Promise<{ companyId: string; title: string; postUnitId: string | null; text: string } | null> {
+  const instr = await prisma.instruction.findUnique({
+    where: { id: instructionId },
+    select: { id: true, companyId: true, title: true, postUnitId: true, postUnit: { select: { name: true, ckp: true } } },
+  });
+  if (!instr) return null;
+  let processNames: string[] = [];
+  if (instr.postUnit?.name) {
+    const procs = await prisma.process.findMany({ where: { companyId: instr.companyId }, select: { name: true, steps: true } });
+    processNames = procs
+      .filter((p) => Array.isArray(p.steps) && (p.steps as { postTitle?: string }[]).some((s) => s?.postTitle === instr.postUnit!.name))
+      .map((p) => p.name);
+  }
+  const text = [
+    instr.title,
+    instr.postUnit?.name ? `Посада: ${instr.postUnit.name}` : '',
+    instr.postUnit?.ckp ? `ЦКП: ${instr.postUnit.ckp}` : '',
+    processNames.length ? `Процеси: ${processNames.join(', ')}` : '',
+  ].filter(Boolean).join('\n');
+  return { companyId: instr.companyId, title: instr.title, postUnitId: instr.postUnitId, text };
+}
+
+// Гачок індексації у вектор-мікросервіс (#224/#263). Стійкий до відмови — не блокує запис.
+async function queueInstructionIndexing(instructionId: string): Promise<void> {
+  try {
+    if (!vectorEnabled()) return;
+    const b = await buildInstructionText(instructionId);
+    if (!b || !b.text.trim()) return;
+    await indexInstruction({ id: instructionId, companyId: b.companyId, title: b.title, postUnitId: b.postUnitId, text: b.text });
+  } catch {
+    // не блокуємо основну операцію
+  }
 }
 
 const instructionInclude = {
@@ -1637,22 +1667,62 @@ api.post('/instructions/:id/propagate', async (req, res) => {
   try {
     const instr = await prisma.instruction.findUnique({ where: { id: req.params.id }, select: { id: true, companyId: true, title: true } });
     if (!instr) return void res.status(404).json({ error: 'Інструкцію не знайдено' });
+
+    const created: { proposalId: string; relatedInstructionId: string; relatedTitle?: string; via: 'link' | 'vector'; score?: number }[] = [];
+    const seen = new Set<string>(); // дедуп targetInstructionId
+
+    // 1) Ручні звʼязки (#223/#224)
     const links = await prisma.instructionLink.findMany({
       where: { instructionId: instr.id },
       include: { related: { select: { id: true, title: true } } },
     });
-    const created: { proposalId: string; relatedInstructionId: string; relatedTitle: string | undefined }[] = [];
     for (const l of links) {
+      if (seen.has(l.relatedInstructionId)) continue;
       const prop = await createProposal(
-        instr.companyId,
-        'INSTRUCTION_EDIT',
+        instr.companyId, 'INSTRUCTION_EDIT',
         { reason: 'linked_instruction_changed', sourceInstructionId: instr.id, sourceTitle: instr.title, relationType: l.relationType },
-        l.relatedInstructionId,
-        req.body?.author,
+        l.relatedInstructionId, req.body?.author,
       );
-      if (prop) created.push({ proposalId: prop.id, relatedInstructionId: l.relatedInstructionId, relatedTitle: l.related?.title });
+      if (prop) { seen.add(l.relatedInstructionId); created.push({ proposalId: prop.id, relatedInstructionId: l.relatedInstructionId, relatedTitle: l.related?.title, via: 'link' }); }
     }
-    res.json({ propagated: created.length, proposals: created });
+
+    // 2) Семантично повʼязані через вектор-мікросервіс (#224 «живий організм»)
+    if (vectorEnabled()) {
+      const b = await buildInstructionText(instr.id);
+      if (b && b.text.trim()) {
+        const related = await findRelatedInstructions(instr.companyId, b.text, instr.id, { limit: 6, minScore: Number(req.body?.minScore) || 0.35 });
+        for (const r of related) {
+          if (seen.has(r.instructionId)) continue;
+          // переконаймось, що ціль існує і в тій же компанії
+          const tgt = await prisma.instruction.findFirst({ where: { id: r.instructionId, companyId: instr.companyId }, select: { id: true, title: true } });
+          if (!tgt) continue;
+          const prop = await createProposal(
+            instr.companyId, 'INSTRUCTION_EDIT',
+            { reason: 'semantically_related_changed', sourceInstructionId: instr.id, sourceTitle: instr.title, similarity: r.score },
+            tgt.id, req.body?.author,
+          );
+          if (prop) { seen.add(tgt.id); created.push({ proposalId: prop.id, relatedInstructionId: tgt.id, relatedTitle: tgt.title, via: 'vector', score: r.score }); }
+        }
+      }
+    }
+
+    res.json({ propagated: created.length, byLink: created.filter((c) => c.via === 'link').length, byVector: created.filter((c) => c.via === 'vector').length, proposals: created });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+// #224 Масова (пере)індексація інструкцій компанії у вектор — для наповнення/міграції.
+api.post('/companies/:id/reindex-instructions', async (req, res) => {
+  try {
+    if (!vectorEnabled()) return void res.status(501).json({ error: 'вектор-сервіс не налаштовано (VECTOR_TOKEN)' });
+    const list = await prisma.instruction.findMany({ where: { companyId: req.params.id }, select: { id: true } });
+    let indexed = 0;
+    for (const i of list) {
+      const b = await buildInstructionText(i.id);
+      if (b && b.text.trim() && (await indexInstruction({ id: i.id, companyId: b.companyId, title: b.title, postUnitId: b.postUnitId, text: b.text }))) indexed++;
+    }
+    res.json({ total: list.length, indexed });
   } catch (err) {
     res.status(500).json({ error: String(err) });
   }
