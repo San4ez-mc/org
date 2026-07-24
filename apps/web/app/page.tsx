@@ -1,4 +1,5 @@
 import { getCompanies } from '@/lib/api';
+import AddCompanyButton from '@/components/AddCompanyButton';
 
 export const dynamic = 'force-dynamic';
 
@@ -12,10 +13,15 @@ export default async function CompaniesPage() {
 
   return (
     <div>
-      <h1 style={{ fontSize: 22, fontWeight: 700, marginBottom: 4 }}>Компанії</h1>
-      <p style={{ color: 'hsl(var(--muted-foreground))', marginBottom: 20, fontSize: 14 }}>
-        Створені через бот структури. {companies.length} шт.
-      </p>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' }}>
+        <div>
+          <h1 style={{ fontSize: 22, fontWeight: 700, marginBottom: 4 }}>Компанії</h1>
+          <p style={{ color: 'hsl(var(--muted-foreground))', marginBottom: 20, fontSize: 14 }}>
+            {companies.length} шт. Обери компанію, щоб працювати з її структурою, процесами та інструкціями.
+          </p>
+        </div>
+        <AddCompanyButton />
+      </div>
       <div style={{ display: 'grid', gap: 12 }}>
         {companies.map((c) => (
           <a

@@ -47,6 +47,27 @@ export async function indexInstruction(instr: {
   return Boolean(r && r.ingested);
 }
 
+/** Проіндексувати файли з Диску компанії (колекція dynamic). Батчами, стійко до відмови.
+ *  Повертає к-ть успішно проіндексованих чанків. */
+export async function indexDriveDocuments(
+  companyId: string,
+  docs: { source: string; content: string; driveFileId: string; path: string }[],
+): Promise<number> {
+  if (!docs.length) return 0;
+  const chunks = docs.map((d) => ({
+    source: d.source,
+    content: d.content,
+    metadata: { companyId, driveFileId: d.driveFileId, path: d.path, kind: 'drive-file' },
+  }));
+  let ingested = 0;
+  const BATCH = 20;
+  for (let i = 0; i < chunks.length; i += BATCH) {
+    const r = await call('/ingest', { collection: 'dynamic', chunks: chunks.slice(i, i + BATCH) });
+    if (r && typeof r.ingested === 'number') ingested += r.ingested;
+  }
+  return ingested;
+}
+
 /** Знайти семантично повʼязані інструкції (у межах компанії), крім самої. */
 export async function findRelatedInstructions(
   companyId: string, text: string, excludeInstructionId: string, opts?: { limit?: number; minScore?: number },

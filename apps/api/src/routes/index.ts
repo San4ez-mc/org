@@ -1,11 +1,11 @@
 import { Router } from 'express';
 import { randomBytes } from 'crypto';
 import { prisma } from '@platform/db';
-import { findFolderByName, listFolderTree } from '@platform/drive';
+import { findFolderByName, listFolderTree, listFolderFiles, readFileText, type DriveNode } from '@platform/drive';
 import { stepsToMermaid } from '@platform/ai';
 import { requireApiSecret } from '../middleware/auth';
 import { handleAct } from '../services/agent';
-import { indexInstruction, findRelatedInstructions, vectorEnabled } from '../services/vector';
+import { indexInstruction, findRelatedInstructions, indexDriveDocuments, vectorEnabled } from '../services/vector';
 
 /**
  * Контракт API платформи (§8 PLAN_PHASE1.md).
@@ -69,6 +69,32 @@ api.get('/companies', async (_req, res) => {
       select: { id: true, name: true, abbr: true, driveRootFolderId: true, orgSheetId: true, createdAt: true },
     });
     res.json({ companies });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+// Створити компанію (легко, лише запис у БД). Drive-папку/структуру додають окремо
+// (панель Drive на сторінці компанії, імпорт або бот). Потрібна лише назва.
+api.post('/companies', async (req, res) => {
+  try {
+    const { name, abbr, mission, companyCkp } = req.body ?? {};
+    if (!name || !String(name).trim()) {
+      return void res.status(400).json({ error: 'Потрібна назва компанії (name).' });
+    }
+    const company = await prisma.company.create({
+      data: {
+        name: String(name).trim(),
+        abbr: abbr ? String(abbr).trim() : null,
+        mission: mission ? String(mission).trim() : null,
+        companyCkp: companyCkp ? String(companyCkp).trim() : null,
+      },
+      select: { id: true, name: true, abbr: true, createdAt: true },
+    });
+    await prisma.changeLog.create({
+      data: { companyId: company.id, entity: 'structure', action: 'create', summary: `Створено компанію «${company.name}»`, author: req.body?.author ?? 'пульт' },
+    }).catch(() => {});
+    res.status(201).json({ company });
   } catch (err) {
     res.status(500).json({ error: String(err) });
   }
@@ -1723,6 +1749,149 @@ api.post('/companies/:id/reindex-instructions', async (req, res) => {
       if (b && b.text.trim() && (await indexInstruction({ id: i.id, companyId: b.companyId, title: b.title, postUnitId: b.postUnitId, text: b.text }))) indexed++;
     }
     res.json({ total: list.length, indexed });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+// #200/#276 Аналіз підключеної Drive-папки компанії: зіставити теки з орг-одиницями
+// (наповнити DriveFolder), зібрати документи посадових інструкцій і (опційно) проіндексувати
+// всі файли у вектор-базу для семантичного пошуку. Ідемпотентно (upsert).
+api.post('/companies/:id/analyze-drive', async (req, res) => {
+  try {
+    const companyId = req.params.id;
+    const company = await prisma.company.findUnique({
+      where: { id: companyId },
+      select: { id: true, name: true, driveRootFolderId: true },
+    });
+    if (!company) return void res.status(404).json({ error: 'company not found' });
+    if (!company.driveRootFolderId) {
+      return void res.status(400).json({ error: 'no-drive-folder', hint: 'спершу підключіть папку: PATCH /companies/:id { driveRootFolderId }' });
+    }
+
+    // 1) Повне дерево Диску
+    const tree = await listFolderTree(company.driveRootFolderId);
+
+    // Якщо структури ще немає — нема з чим зіставляти (усе було б «поза структурою»).
+    const unitCount = await prisma.orgUnit.count({ where: { companyId } });
+    if (unitCount === 0) {
+      const foldersFlat: { name: string; path: string }[] = [];
+      const collect = (nodes: DriveNode[], path: string) => {
+        for (const n of nodes) if (n.isFolder) { const p = `${path}/${n.name}`; foldersFlat.push({ name: n.name, path: p }); if (n.children) collect(n.children, p); }
+      };
+      collect(tree, '');
+      return void res.json({
+        company: { id: company.id, name: company.name, driveRootFolderId: company.driveRootFolderId },
+        tree,
+        structureNote: 'no-org-structure',
+        structureHint: `У компанії «${company.name}» ще немає орг-структури, тож зіставляти теки нема з чим. Спершу створіть структуру (бот/імпорт) — або підключіть цю папку до компанії, у якої структура вже є. Знайдено ${foldersFlat.length} тек на Диску.`,
+        changePlan: { linked: [], renameSuggestions: [], createSuggestions: [], extraFolders: foldersFlat.map((f) => ({ name: f.name, path: f.path, folderId: '' })) },
+        instructionDocs: [], indexedFiles: 0, indexSkippedReason: 'no-org-structure',
+        summary: { linked: 0, renameSuggestions: 0, createSuggestions: 0, extraFolders: foldersFlat.length, instructionDocs: 0, indexedFiles: 0 },
+      });
+    }
+
+    // 2) Орг-одиниці + fuzzy-зіставлення (людський фактор: назви тек ≈ назви одиниць,
+    //    але з різницею — номери, відмінки, різні слова). Dice на біграмах + впевненість.
+    const units = await prisma.orgUnit.findMany({ where: { companyId }, select: { id: true, name: true, type: true } });
+    const norm = (s: string) => s.toLowerCase().replace(/^\s*\d+[.)]\s*/, '').replace(/[^\p{L}\p{N}\s]/gu, ' ').replace(/\s+/g, ' ').trim();
+    const bigrams = (s: string) => { const g = new Set<string>(); const t = ` ${s} `; for (let i = 0; i < t.length - 1; i++) g.add(t.slice(i, i + 2)); return g; };
+    const dice = (a: string, b: string) => { if (a === b) return 1; const A = bigrams(a), B = bigrams(b); if (!A.size || !B.size) return 0; let inter = 0; for (const x of A) if (B.has(x)) inter++; return (2 * inter) / (A.size + B.size); };
+    const r2 = (x: number) => Math.round(x * 100) / 100;
+    const unitNorm = units.map((u) => ({ u, n: norm(u.name) }));
+    const bestUnit = (folderName: string): { u: (typeof units)[number]; score: number } | null => {
+      const fn = norm(folderName);
+      let best: { u: (typeof units)[number]; score: number } | null = null;
+      for (const { u, n } of unitNorm) { const s = n === fn ? 1 : dice(fn, n); if (!best || s > best.score) best = { u, score: s }; }
+      return best;
+    };
+    const HIGH = 0.82; // авто-лінк (нічого на Диску не міняємо)
+    const MED = 0.55;  // пропозиція звʼязати/перейменувати — лише після підтвердження
+
+    // 3) Рекурсивний обхід → план змін (нічого на Диску не міняємо; авто-лінк лише впевнене)
+    const linked: { folder: string; path: string; folderId: string; unit: string; unitId: string; score: number }[] = [];
+    const renameSuggestions: { folder: string; path: string; folderId: string; suggestUnit: string; suggestUnitId: string; canonicalName: string; score: number }[] = [];
+    const extraFolders: { name: string; path: string; folderId: string; bestGuess?: string; bestScore?: number }[] = [];
+    const instructionDocs: { name: string; path: string; fileId: string; webViewLink?: string }[] = [];
+    const matchedUnitIds = new Set<string>();
+    const suggestedUnitIds = new Set<string>();
+
+    const walk = async (nodes: DriveNode[], path: string, insideInstrFolder: boolean) => {
+      for (const n of nodes) {
+        const p = `${path}/${n.name}`;
+        if (n.isFolder) {
+          const best = bestUnit(n.name);
+          if (best && best.score >= HIGH && !matchedUnitIds.has(best.u.id)) {
+            await prisma.driveFolder.upsert({
+              where: { orgUnitId: best.u.id },
+              create: { companyId, orgUnitId: best.u.id, path: p, driveFolderId: n.id },
+              update: { path: p, driveFolderId: n.id },
+            });
+            matchedUnitIds.add(best.u.id);
+            linked.push({ folder: n.name, path: p, folderId: n.id, unit: best.u.name, unitId: best.u.id, score: r2(best.score) });
+          } else if (best && best.score >= MED && !suggestedUnitIds.has(best.u.id)) {
+            suggestedUnitIds.add(best.u.id);
+            renameSuggestions.push({ folder: n.name, path: p, folderId: n.id, suggestUnit: best.u.name, suggestUnitId: best.u.id, canonicalName: best.u.name, score: r2(best.score) });
+          } else {
+            extraFolders.push({ name: n.name, path: p, folderId: n.id, bestGuess: best?.u.name, bestScore: best ? r2(best.score) : undefined });
+          }
+          const nextInside = insideInstrFolder || /посадов/i.test(n.name);
+          if (n.children) await walk(n.children, p, nextInside);
+        } else if (insideInstrFolder) {
+          instructionDocs.push({ name: n.name, path: p, fileId: n.id, webViewLink: n.webViewLink });
+        }
+      }
+    };
+    await walk(tree, '', false);
+
+    // Одиниці без папки (не звʼязані й не в пропозиціях перейменування) → пропозиція створити
+    const createSuggestions = units
+      .filter((u) => !matchedUnitIds.has(u.id) && !suggestedUnitIds.has(u.id))
+      .map((u) => ({ id: u.id, name: u.name, type: u.type }));
+
+    // 4) (Опційно) індексація всіх файлів у вектор-базу
+    let indexedFiles = 0;
+    let indexSkippedReason: string | null = null;
+    const doIndex = req.body?.index !== false;
+    if (doIndex) {
+      if (!vectorEnabled()) {
+        indexSkippedReason = 'vector-disabled (VECTOR_TOKEN не задано)';
+      } else {
+        const files = await listFolderFiles(company.driveRootFolderId);
+        const docs: { source: string; content: string; driveFileId: string; path: string }[] = [];
+        for (const f of files) {
+          const text = await readFileText(f);
+          if (text && text.trim()) docs.push({ source: f.name, content: text, driveFileId: f.id, path: f.name });
+        }
+        indexedFiles = await indexDriveDocuments(companyId, docs);
+      }
+    }
+
+    // 5) Журнал
+    await prisma.changeLog.create({
+      data: {
+        companyId, entity: 'structure', action: 'update',
+        summary: `Скан Диску: ${linked.length} звʼязано, ${renameSuggestions.length} до перейменування, ${createSuggestions.length} створити, ${extraFolders.length} зайвих, ${instructionDocs.length} інструкцій, ${indexedFiles} файлів у вектор-базі`,
+        author: req.body?.author ?? 'system',
+      },
+    }).catch(() => {});
+
+    res.json({
+      company: { id: company.id, name: company.name, driveRootFolderId: company.driveRootFolderId },
+      tree,
+      changePlan: { linked, renameSuggestions, createSuggestions, extraFolders },
+      instructionDocs,
+      indexedFiles,
+      indexSkippedReason,
+      summary: {
+        linked: linked.length,
+        renameSuggestions: renameSuggestions.length,
+        createSuggestions: createSuggestions.length,
+        extraFolders: extraFolders.length,
+        instructionDocs: instructionDocs.length,
+        indexedFiles,
+      },
+    });
   } catch (err) {
     res.status(500).json({ error: String(err) });
   }

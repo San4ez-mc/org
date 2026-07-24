@@ -1,6 +1,7 @@
 import { getCompany, type OrgUnit } from '@/lib/api';
 import CompanyHeader from '@/components/CompanyTabs';
 import PeoplePanel from '@/components/PeoplePanel';
+import DriveConnectPanel from '@/components/DriveConnectPanel';
 
 export const dynamic = 'force-dynamic';
 
@@ -33,11 +34,7 @@ export default async function CompanyOverview({ params }: { params: { id: string
     <div>
       <CompanyHeader company={company} />
 
-      {company.driveRootFolderId && (
-        <a href={`https://drive.google.com/drive/folders/${company.driveRootFolderId}`} target="_blank" style={{ fontSize: 13, color: 'hsl(var(--primary))' }}>
-          📂 Папка компанії на Google Drive
-        </a>
-      )}
+      <DriveConnectPanel companyId={company.id} driveRootFolderId={company.driveRootFolderId} />
 
       <div style={{ display: 'flex', gap: 12, margin: '16px 0 24px', flexWrap: 'wrap' }}>
         <Stat label="Відділень" value={divisions.length} />

@@ -220,11 +220,26 @@ export async function findFolderByName(parentId: string, name: string): Promise<
   return findChild(parentId, name, FOLDER_MIME);
 }
 
-/** Побудувати дерево вмісту теки (папки + файли з посиланням), рекурсивно. */
+/** Виконати async-функцію над елементами з обмеженою конкурентністю (пул воркерів). */
+async function mapWithConcurrency<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let next = 0;
+  async function worker() {
+    while (next < items.length) {
+      const i = next++;
+      results[i] = await fn(items[i]);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
+}
+
+/** Побудувати дерево вмісту теки (папки + файли з посиланням), рекурсивно.
+ *  Підтеки читаються паралельно (обмежена конкурентність) — швидко на великих деревах. */
 export async function listFolderTree(folderId: string, depth = 6): Promise<DriveNode[]> {
   if (depth < 0) return [];
   const drive = getDrive();
-  const out: DriveNode[] = [];
+  const entries: DriveNode[] = [];
   let pageToken: string | undefined;
   do {
     const res = await withRetry(() =>
@@ -238,19 +253,23 @@ export async function listFolderTree(folderId: string, depth = 6): Promise<Drive
       }),
     );
     for (const f of res.data.files ?? []) {
-      const isFolder = f.mimeType === FOLDER_MIME;
-      out.push({
+      entries.push({
         id: f.id!,
         name: f.name!,
         mimeType: f.mimeType!,
         webViewLink: f.webViewLink ?? undefined,
-        isFolder,
-        children: isFolder ? await listFolderTree(f.id!, depth - 1) : undefined,
+        isFolder: f.mimeType === FOLDER_MIME,
       });
     }
     pageToken = res.data.nextPageToken ?? undefined;
   } while (pageToken);
-  return out;
+
+  // Рекурсія у підтеки — паралельно, до 8 одночасно (withRetry гасить rate-limit).
+  const folders = entries.filter((e) => e.isFolder);
+  await mapWithConcurrency(folders, 8, async (node) => {
+    node.children = await listFolderTree(node.id, depth - 1);
+  });
+  return entries;
 }
 
 /** Прочитати текст файлу: Google Doc → export text/plain; text/* → media. Інакше null. */

@@ -1,23 +1,33 @@
 'use client';
 import { usePathname } from 'next/navigation';
 
+interface Item { icon: string; label: string; href: string; active: boolean }
+
 export default function Sidebar() {
   const path = usePathname() || '/';
   const m = path.match(/^\/company\/([^/]+)/);
   const companyId = m?.[1];
 
-  const items = [
-    { icon: '🏢', label: 'Компанії', href: '/', active: path === '/' || (path.startsWith('/company/') && !path.endsWith('/structure') && !path.includes('/processes')) },
-    { icon: '📊', label: 'Дашборд', href: companyId ? `/company/${companyId}/dashboard` : '/', active: path.endsWith('/dashboard'), disabled: !companyId },
-    { icon: '🗂️', label: 'Орг.структура', href: companyId ? `/company/${companyId}/structure` : '/', active: path.endsWith('/structure'), disabled: !companyId },
-    { icon: '⚙️', label: 'Процеси', href: companyId ? `/company/${companyId}/processes` : '/', active: path.includes('/processes'), disabled: !companyId },
-    { icon: '📈', label: 'Статистики', href: companyId ? `/company/${companyId}/stats` : '/', active: path.endsWith('/stats'), disabled: !companyId },
-    { icon: '📄', label: 'Інструкції', href: companyId ? `/company/${companyId}/instructions` : '/', active: path.endsWith('/instructions'), disabled: !companyId },
-    { icon: '⬆️', label: 'Імпорт', href: companyId ? `/company/${companyId}/import` : '/', active: path.endsWith('/import'), disabled: !companyId },
-    { icon: '📓', label: 'Журнал', href: companyId ? `/company/${companyId}/journal` : '/', active: path.endsWith('/journal'), disabled: !companyId },
-    { icon: '🔬', label: 'Діагностика', href: companyId ? `/company/${companyId}/health` : '/', active: path.endsWith('/health'), disabled: !companyId },
+  // Глобальні пункти — видно завжди
+  const globalItems: Item[] = [
+    { icon: '🏢', label: 'Компанії', href: '/', active: path === '/' },
     { icon: '🩺', label: 'Логи', href: '/logs', active: path === '/logs' },
   ];
+
+  // Пункти компанії — з'являються ЛИШЕ після вибору компанії
+  const companyItems: Item[] = companyId
+    ? [
+        { icon: '🏠', label: 'Огляд', href: `/company/${companyId}`, active: path === `/company/${companyId}` },
+        { icon: '📊', label: 'Дашборд', href: `/company/${companyId}/dashboard`, active: path.endsWith('/dashboard') },
+        { icon: '🗂️', label: 'Орг.структура', href: `/company/${companyId}/structure`, active: path.endsWith('/structure') },
+        { icon: '⚙️', label: 'Процеси', href: `/company/${companyId}/processes`, active: path.includes('/processes') },
+        { icon: '📈', label: 'Статистики', href: `/company/${companyId}/stats`, active: path.endsWith('/stats') },
+        { icon: '📄', label: 'Інструкції', href: `/company/${companyId}/instructions`, active: path.endsWith('/instructions') },
+        { icon: '⬆️', label: 'Імпорт', href: `/company/${companyId}/import`, active: path.endsWith('/import') },
+        { icon: '📓', label: 'Журнал', href: `/company/${companyId}/journal`, active: path.endsWith('/journal') },
+        { icon: '🔬', label: 'Діагностика', href: `/company/${companyId}/health`, active: path.endsWith('/health') },
+      ]
+    : [];
 
   return (
     <nav
@@ -27,28 +37,32 @@ export default function Sidebar() {
         display: 'flex', flexDirection: 'column', gap: 4,
       }}
     >
-      {items.map((it) => (
-        <a
-          key={it.label}
-          href={it.disabled ? undefined : it.href}
-          title={it.disabled && it.label !== 'Інструкції' ? 'Спершу оберіть компанію' : it.label}
-          style={{ textDecoration: 'none', cursor: it.disabled ? 'default' : 'pointer' }}
-        >
-          <div
-            style={{
-              display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3,
-              padding: '9px 2px', borderRadius: 8,
-              background: it.active ? 'hsl(var(--muted))' : 'transparent',
-              color: it.active ? 'hsl(var(--foreground))' : 'hsl(var(--muted-foreground))',
-              opacity: it.disabled ? 0.45 : 1,
-              borderLeft: it.active ? '2px solid hsl(var(--primary))' : '2px solid transparent',
-            }}
-          >
-            <span style={{ fontSize: 18 }}>{it.icon}</span>
-            <span style={{ fontSize: 9.5, textAlign: 'center', lineHeight: 1.1 }}>{it.label}</span>
-          </div>
-        </a>
-      ))}
+      {globalItems.map((it) => <NavLink key={it.label} item={it} />)}
+
+      {companyId && (
+        <div style={{ borderTop: '1px solid hsl(var(--border))', margin: '8px 4px 6px' }} />
+      )}
+
+      {companyItems.map((it) => <NavLink key={it.label} item={it} />)}
     </nav>
+  );
+}
+
+function NavLink({ item }: { item: Item }) {
+  return (
+    <a href={item.href} title={item.label} style={{ textDecoration: 'none' }}>
+      <div
+        style={{
+          display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3,
+          padding: '9px 2px', borderRadius: 8,
+          background: item.active ? 'hsl(var(--muted))' : 'transparent',
+          color: item.active ? 'hsl(var(--foreground))' : 'hsl(var(--muted-foreground))',
+          borderLeft: item.active ? '2px solid hsl(var(--primary))' : '2px solid transparent',
+        }}
+      >
+        <span style={{ fontSize: 18 }}>{item.icon}</span>
+        <span style={{ fontSize: 9.5, textAlign: 'center', lineHeight: 1.1 }}>{item.label}</span>
+      </div>
+    </a>
   );
 }

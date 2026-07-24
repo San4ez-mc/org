@@ -1,5 +1,6 @@
 'use server';
 import { revalidatePath } from 'next/cache';
+import type { AnalyzeReport } from '@/lib/drive-types';
 
 const BASE = process.env.ORG_API_URL ?? 'http://127.0.0.1:4100/api';
 const TOKEN = process.env.ORG_API_TOKEN ?? '';
@@ -107,4 +108,30 @@ export async function updateStatistic(companyId: string, statisticId: string, da
 export async function deleteStatistic(companyId: string, statisticId: string) {
   await call(`/statistics/${statisticId}`, 'DELETE', { author: 'пульт' });
   revalidatePath(`/company/${companyId}/stats`);
+}
+
+// ── #200 Підключення Google Drive-папки + аналіз структури/індексація ──────
+/** Витягти id теки з URL Google Drive або прийняти «сирий» id. */
+function extractFolderId(input: string): string | null {
+  const s = input.trim();
+  const m = s.match(/\/folders\/([a-zA-Z0-9_-]+)/) ?? s.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+  if (m) return m[1];
+  if (/^[a-zA-Z0-9_-]{16,}$/.test(s)) return s; // схоже на «сирий» id
+  return null;
+}
+
+/** Підключити (або відв'язати) кореневу Drive-папку компанії. */
+export async function connectDriveFolder(companyId: string, input: string): Promise<{ folderId: string | null }> {
+  const folderId = input.trim() ? extractFolderId(input) : null;
+  if (input.trim() && !folderId) throw new Error('Не вдалось розпізнати id папки. Встав посилання виду drive.google.com/drive/folders/… або сам id.');
+  await call(`/companies/${companyId}`, 'PATCH', { driveRootFolderId: folderId });
+  revalidatePath(`/company/${companyId}`);
+  return { folderId };
+}
+
+/** Проаналізувати підключену папку: зіставити теки з одиницями + (опц.) індексація у вектор. */
+export async function analyzeDrive(companyId: string, index = true): Promise<AnalyzeReport> {
+  const report = (await call(`/companies/${companyId}/analyze-drive`, 'POST', { index, author: 'пульт' })) as AnalyzeReport;
+  revalidatePath(`/company/${companyId}`);
+  return report;
 }
