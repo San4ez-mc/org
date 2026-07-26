@@ -18,6 +18,7 @@ export default function Sidebar() {
   const companyItems: Item[] = companyId
     ? [
         { icon: '🏠', label: 'Огляд', href: `/company/${companyId}`, active: path === `/company/${companyId}` },
+        { icon: '📁', label: 'Папка', href: `/company/${companyId}/folder`, active: path.endsWith('/folder') },
         { icon: '📊', label: 'Дашборд', href: `/company/${companyId}/dashboard`, active: path.endsWith('/dashboard') },
         { icon: '🗂️', label: 'Орг.структура', href: `/company/${companyId}/structure`, active: path.endsWith('/structure') },
         { icon: '⚙️', label: 'Процеси', href: `/company/${companyId}/processes`, active: path.includes('/processes') },

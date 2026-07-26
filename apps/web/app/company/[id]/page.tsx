@@ -1,7 +1,5 @@
-import { getCompany, type OrgUnit } from '@/lib/api';
+import { getCompany } from '@/lib/api';
 import CompanyHeader from '@/components/CompanyTabs';
-import PeoplePanel from '@/components/PeoplePanel';
-import DriveConnectPanel from '@/components/DriveConnectPanel';
 
 export const dynamic = 'force-dynamic';
 
@@ -13,46 +11,65 @@ export default async function CompanyOverview({ params }: { params: { id: string
     return <p style={{ color: 'hsl(var(--muted-foreground))' }}>Компанію не знайдено або API недоступний.</p>;
   }
 
-  const units = company.orgUnits;
-  const divisions = units.filter((u) => u.type === 'DIVISION');
-  const nameOf = (id: string | null) => units.find((u) => u.id === id)?.name ?? '';
-  const divisionFor = (u: OrgUnit): string => {
-    let cur: OrgUnit | undefined = u;
-    // піднімаємось до відділення
-    while (cur && cur.type !== 'DIVISION') cur = units.find((x) => x.id === cur!.parentId);
-    return cur?.name ?? '';
-  };
+  const id = company.id;
+  const s1 = !!company.driveRootFolderId;              // папка підключена
+  const s2 = (company.orgUnits?.length ?? 0) > 0;      // є орг-структура
+  const s3 = (company.processes?.length ?? 0) > 0;     // є процеси
+  const s4 = false;                                    // інструкції (створюються на Drive)
 
-  // Посади для призначення (без керівницьких заглушок дублюємо як опції)
-  const postOptions = units
-    .filter((u) => u.type === 'POST')
-    .map((p) => ({ id: p.id, name: p.name, division: divisionFor(p) }));
-
-  const posts = units.filter((u) => u.type === 'POST');
+  const steps = [
+    { n: 1, title: 'Підключити робочу папку компанії', desc: 'Google Drive: система прочитає й проіндексує файли, і саме туди створюватиме посадові інструкції.', href: `/company/${id}/folder`, cta: 'Підключити папку', done: s1, available: true },
+    { n: 2, title: 'Створити орг-структуру', desc: 'Відділення, посади, ЦКП — через бота-агента або імпорт.', href: `/company/${id}/structure`, cta: 'До структури', done: s2, available: s1 },
+    { n: 3, title: 'Описати бізнес-процеси', desc: 'Хто за що відповідає, кроки процесів.', href: `/company/${id}/processes`, cta: 'До процесів', done: s3, available: s2 },
+    { n: 4, title: 'Посадові інструкції', desc: 'Створюються на Google Drive у підключеній папці, привʼязані до посад.', href: `/company/${id}/instructions`, cta: 'До інструкцій', done: s4, available: s3 },
+  ];
+  const doneCount = steps.filter((s) => s.done).length;
 
   return (
     <div>
       <CompanyHeader company={company} />
+      <div style={{ maxWidth: 720, marginTop: 8 }}>
+        <h2 style={{ fontSize: 18, fontWeight: 700, margin: '0 0 4px' }}>План заведення компанії</h2>
+        <p style={{ color: 'hsl(var(--muted-foreground))', fontSize: 13.5, margin: '0 0 18px' }}>
+          Пройди кроки по черзі — орг-структура, папки, процеси та інструкції зʼявляться в системі. Виконано: {doneCount}/{steps.length}.
+        </p>
 
-      <DriveConnectPanel companyId={company.id} driveRootFolderId={company.driveRootFolderId} />
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {steps.map((s) => {
+            const state = s.done ? 'done' : s.available ? 'active' : 'locked';
+            const border = state === 'done' ? 'hsl(142 45% 35%)' : state === 'active' ? 'hsl(var(--primary))' : 'hsl(var(--border))';
+            return (
+              <div key={s.n} style={{
+                display: 'flex', gap: 14, alignItems: 'flex-start', padding: 16,
+                background: 'hsl(var(--card))', border: `1px solid ${border}`, borderRadius: 12,
+                opacity: state === 'locked' ? 0.55 : 1,
+              }}>
+                <div style={{
+                  width: 30, height: 30, borderRadius: '50%', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  fontSize: 14, fontWeight: 700,
+                  background: state === 'done' ? 'hsl(142 45% 30%)' : state === 'active' ? 'hsl(var(--primary))' : 'hsl(var(--muted))',
+                  color: state === 'locked' ? 'hsl(var(--muted-foreground))' : '#fff',
+                }}>{state === 'done' ? '✓' : state === 'locked' ? '🔒' : s.n}</div>
 
-      <div style={{ display: 'flex', gap: 12, margin: '16px 0 24px', flexWrap: 'wrap' }}>
-        <Stat label="Відділень" value={divisions.length} />
-        <Stat label="Посад" value={posts.length} />
-        <Stat label="Працівників" value={company.members.length} />
-        <Stat label="Процесів" value={company.processes?.length ?? 0} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontWeight: 600, fontSize: 15 }}>{s.title}</div>
+                  <div style={{ fontSize: 12.5, color: 'hsl(var(--muted-foreground))', marginTop: 3, lineHeight: 1.5 }}>{s.desc}</div>
+                </div>
+
+                {state !== 'locked' && (
+                  <a href={s.href} style={{
+                    flexShrink: 0, alignSelf: 'center', textDecoration: 'none', fontSize: 13, fontWeight: 500,
+                    padding: '8px 14px', borderRadius: 8,
+                    background: state === 'done' ? 'transparent' : 'hsl(var(--primary))',
+                    color: state === 'done' ? 'hsl(var(--primary))' : '#fff',
+                    border: state === 'done' ? '1px solid hsl(var(--border))' : 'none',
+                  }}>{state === 'done' ? 'Відкрити' : s.cta}</a>
+                )}
+              </div>
+            );
+          })}
+        </div>
       </div>
-
-      <PeoplePanel companyId={company.id} members={company.members} posts={postOptions} />
-    </div>
-  );
-}
-
-function Stat({ label, value }: { label: string; value: number }) {
-  return (
-    <div style={{ background: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: 'var(--radius)', padding: '12px 18px', minWidth: 92 }}>
-      <div style={{ fontSize: 22, fontWeight: 700 }}>{value}</div>
-      <div style={{ fontSize: 12, color: 'hsl(var(--muted-foreground))' }}>{label}</div>
     </div>
   );
 }
