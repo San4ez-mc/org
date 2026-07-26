@@ -39,16 +39,20 @@ export default function AddCompanyButton() {
     });
   }
 
-  if (!open) {
-    return <button style={gradBtn} onClick={() => setOpen(true)}><span style={{ fontSize: 17, lineHeight: 1 }}>＋</span> Додати компанію</button>;
-  }
-
   return (
+    <>
+      <button style={gradBtn} onClick={() => setOpen(true)}><span style={{ fontSize: 17, lineHeight: 1 }}>＋</span> Додати компанію</button>
+      {open && (
+        <div
+          onClick={() => { if (!pending) { setOpen(false); setErr(''); } }}
+          style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'hsl(222 47% 3% / 0.66)', backdropFilter: 'blur(3px)', WebkitBackdropFilter: 'blur(3px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}
+        >
     <div
+      onClick={(e) => e.stopPropagation()}
       style={{
-        width: 380, background: 'hsl(var(--card))',
+        width: 380, maxWidth: '100%', background: 'hsl(var(--card))',
         border: '1px solid hsl(var(--border))', borderRadius: 16, padding: 22,
-        boxShadow: '0 20px 50px hsl(222 60% 3% / 0.45)',
+        boxShadow: '0 24px 64px hsl(222 60% 2% / 0.6)',
       }}
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
@@ -88,5 +92,8 @@ export default function AddCompanyButton() {
         <button style={secBtn} onClick={() => { setOpen(false); setErr(''); }} disabled={pending}>Скасувати</button>
       </div>
     </div>
+        </div>
+      )}
+    </>
   );
 }
