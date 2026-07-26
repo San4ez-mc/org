@@ -147,17 +147,22 @@ function Row({ node, level, excluded, ancestorExcluded, onToggle }: {
 
         {/* перемикач виключення — недоступний, якщо предок уже виключено */}
         {ancestorExcluded ? (
-          <span title="виключено разом із текою-предком" style={{ fontSize: 13, opacity: 0.6 }}>🚫</span>
+          <span title="виключено разом із текою-предком" style={{
+            flexShrink: 0, fontSize: 11.5, fontWeight: 600, padding: '3px 9px', borderRadius: 999,
+            background: 'hsl(0 60% 45% / 0.12)', color: 'hsl(0 65% 62%)', border: '1px solid hsl(0 60% 45% / 0.3)',
+          }}>🚫 виключено</span>
         ) : (
           <button
             onClick={() => onToggle(node.id)}
             title={selfExcluded ? 'Повернути в індексацію' : 'Виключити з індексації'}
             style={{
-              background: 'transparent', border: 'none', cursor: 'pointer', fontSize: 13, padding: '2px 5px',
-              borderRadius: 6, color: selfExcluded ? 'hsl(0 70% 60%)' : 'hsl(var(--muted-foreground))',
+              flexShrink: 0, cursor: 'pointer', fontSize: 11.5, fontWeight: 600, padding: '3px 9px', borderRadius: 999,
+              background: selfExcluded ? 'hsl(0 65% 48%)' : 'transparent',
+              color: selfExcluded ? '#fff' : 'hsl(var(--muted-foreground))',
+              border: selfExcluded ? '1px solid hsl(0 65% 48%)' : '1px solid hsl(var(--border))',
             }}
           >
-            {selfExcluded ? '🚫 виключено' : '👁'}
+            {selfExcluded ? '🚫 виключено' : 'виключити'}
           </button>
         )}
       </div>
