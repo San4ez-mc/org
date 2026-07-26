@@ -1,6 +1,7 @@
 import { getCompany } from '@/lib/api';
 import CompanyHeader from '@/components/CompanyTabs';
 import DriveConnectPanel from '@/components/DriveConnectPanel';
+import DriveTreeManager from '@/components/DriveTreeManager';
 
 export const dynamic = 'force-dynamic';
 
@@ -19,6 +20,8 @@ export default async function CompanyFolder({ params }: { params: { id: string }
         ← Повернутись до плану
       </a>
       <DriveConnectPanel companyId={company.id} driveRootFolderId={company.driveRootFolderId} />
+      {/* #302 Коли папка прив'язана — дерево показуємо ЗАВЖДИ (виключення тут же). */}
+      {company.driveRootFolderId && <DriveTreeManager companyId={company.id} />}
     </div>
   );
 }

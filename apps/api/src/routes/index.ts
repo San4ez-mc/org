@@ -1754,6 +1754,39 @@ api.post('/companies/:id/reindex-instructions', async (req, res) => {
   }
 });
 
+// #302 Легке дерево Диску (лише метадані, без читання файлів) — для сторінки «Папка».
+// Показуємо ЗАВЖДИ, коли папка прив'язана, разом зі списком виключених id.
+api.get('/companies/:id/drive-tree', async (req, res) => {
+  try {
+    const company = await prisma.company.findUnique({
+      where: { id: req.params.id },
+      select: { driveRootFolderId: true, driveExcludedIds: true },
+    });
+    if (!company) return void res.status(404).json({ error: 'company not found' });
+    if (!company.driveRootFolderId) return void res.json({ tree: [], excludedIds: [], connected: false });
+    const tree = await listFolderTree(company.driveRootFolderId);
+    res.json({ tree, excludedIds: company.driveExcludedIds ?? [], connected: true });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+// #302 Оновити список тек/файлів, виключених з індексації.
+api.patch('/companies/:id/drive-exclusions', async (req, res) => {
+  try {
+    const ids = Array.isArray(req.body?.excludedIds) ? req.body.excludedIds.filter((x: unknown) => typeof x === 'string') : null;
+    if (!ids) return void res.status(400).json({ error: 'excludedIds[] обовʼязкове' });
+    const company = await prisma.company.update({
+      where: { id: req.params.id },
+      data: { driveExcludedIds: ids },
+      select: { driveExcludedIds: true },
+    });
+    res.json({ excludedIds: company.driveExcludedIds });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
 // #200/#276 Аналіз підключеної Drive-папки компанії: зіставити теки з орг-одиницями
 // (наповнити DriveFolder), зібрати документи посадових інструкцій і (опційно) проіндексувати
 // всі файли у вектор-базу для семантичного пошуку. Ідемпотентно (upsert).

@@ -129,6 +129,16 @@ export async function connectDriveFolder(companyId: string, input: string): Prom
   return { folderId };
 }
 
+/** #302 Легке дерево Диску (лише метадані) + список виключених id. Для сторінки «Папка». */
+export async function getDriveTree(companyId: string): Promise<{ tree: import('@/lib/drive-types').DriveNode[]; excludedIds: string[]; connected: boolean }> {
+  return call(`/companies/${companyId}/drive-tree`, 'GET');
+}
+
+/** #302 Зберегти теки/файли, виключені з індексації. */
+export async function saveDriveExclusions(companyId: string, excludedIds: string[]): Promise<{ excludedIds: string[] }> {
+  return call(`/companies/${companyId}/drive-exclusions`, 'PATCH', { excludedIds });
+}
+
 /** Проаналізувати підключену папку: зіставити теки з одиницями + (опц.) індексація у вектор. */
 export async function analyzeDrive(companyId: string, index = true): Promise<AnalyzeReport> {
   const report = (await call(`/companies/${companyId}/analyze-drive`, 'POST', { index, author: 'пульт' })) as AnalyzeReport;
