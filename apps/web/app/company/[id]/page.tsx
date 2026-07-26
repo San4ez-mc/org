@@ -26,41 +26,51 @@ export default async function CompanyOverview({ params }: { params: { id: string
   return (
     <div>
       <CompanyHeader company={company} />
-      <div style={{ maxWidth: 720, marginTop: 8 }}>
-        <h2 style={{ fontSize: 18, fontWeight: 700, margin: '0 0 4px' }}>План заведення компанії</h2>
-        <p style={{ color: 'hsl(var(--muted-foreground))', fontSize: 13.5, margin: '0 0 18px' }}>
-          Пройди кроки по черзі — орг-структура, папки, процеси та інструкції зʼявляться в системі. Виконано: {doneCount}/{steps.length}.
+      <div style={{ maxWidth: 760, margin: '0 auto', width: '100%' }}>
+        <h2 style={{ fontSize: 19, fontWeight: 700, margin: '4px 0 4px' }}>План заведення компанії</h2>
+        <p style={{ color: 'hsl(var(--muted-foreground))', fontSize: 13.5, margin: '0 0 10px' }}>
+          Пройди кроки по черзі — орг-структура, папки, процеси та інструкції зʼявляться в системі.
         </p>
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {/* Прогрес-смужка */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '0 0 20px' }}>
+          <div style={{ flex: 1, height: 6, borderRadius: 999, background: 'hsl(var(--muted))', overflow: 'hidden' }}>
+            <div style={{ width: `${(doneCount / steps.length) * 100}%`, height: '100%', background: 'hsl(142 45% 42%)', borderRadius: 999, transition: 'width .3s' }} />
+          </div>
+          <span style={{ fontSize: 12.5, color: 'hsl(var(--muted-foreground))', whiteSpace: 'nowrap' }}>{doneCount} / {steps.length}</span>
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           {steps.map((s) => {
             const state = s.done ? 'done' : s.available ? 'active' : 'locked';
-            const border = state === 'done' ? 'hsl(142 45% 35%)' : state === 'active' ? 'hsl(var(--primary))' : 'hsl(var(--border))';
+            const border = state === 'done' ? 'hsl(142 40% 30% / 0.6)' : state === 'active' ? 'hsl(var(--primary) / 0.5)' : 'hsl(var(--border))';
             return (
               <div key={s.n} style={{
-                display: 'flex', gap: 14, alignItems: 'flex-start', padding: 16,
-                background: 'hsl(var(--card))', border: `1px solid ${border}`, borderRadius: 12,
-                opacity: state === 'locked' ? 0.55 : 1,
+                display: 'flex', gap: 14, alignItems: 'center', padding: '16px 18px',
+                background: 'hsl(var(--card))', border: `1px solid ${border}`, borderRadius: 14,
+                opacity: state === 'locked' ? 0.5 : 1,
+                boxShadow: state === 'active' ? '0 0 0 1px hsl(var(--primary) / 0.12)' : 'none',
               }}>
                 <div style={{
-                  width: 30, height: 30, borderRadius: '50%', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  width: 32, height: 32, borderRadius: '50%', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
                   fontSize: 14, fontWeight: 700,
-                  background: state === 'done' ? 'hsl(142 45% 30%)' : state === 'active' ? 'hsl(var(--primary))' : 'hsl(var(--muted))',
+                  background: state === 'done' ? 'hsl(142 45% 32%)' : state === 'active' ? 'hsl(var(--primary))' : 'hsl(var(--muted))',
                   color: state === 'locked' ? 'hsl(var(--muted-foreground))' : '#fff',
                 }}>{state === 'done' ? '✓' : state === 'locked' ? '🔒' : s.n}</div>
 
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontWeight: 600, fontSize: 15 }}>{s.title}</div>
-                  <div style={{ fontSize: 12.5, color: 'hsl(var(--muted-foreground))', marginTop: 3, lineHeight: 1.5 }}>{s.desc}</div>
+                  <div style={{ fontWeight: 600, fontSize: 15, lineHeight: 1.3 }}>{s.title}</div>
+                  <div style={{ fontSize: 12.5, color: 'hsl(var(--muted-foreground))', marginTop: 4, lineHeight: 1.5 }}>{s.desc}</div>
                 </div>
 
                 {state !== 'locked' && (
                   <a href={s.href} style={{
-                    flexShrink: 0, alignSelf: 'center', textDecoration: 'none', fontSize: 13, fontWeight: 500,
-                    padding: '8px 14px', borderRadius: 8,
+                    flexShrink: 0, textAlign: 'center', minWidth: 128, boxSizing: 'border-box',
+                    textDecoration: 'none', fontSize: 13, fontWeight: 600, letterSpacing: 0.1,
+                    padding: '9px 16px', borderRadius: 9,
                     background: state === 'done' ? 'transparent' : 'hsl(var(--primary))',
-                    color: state === 'done' ? 'hsl(var(--primary))' : '#fff',
-                    border: state === 'done' ? '1px solid hsl(var(--border))' : 'none',
+                    color: state === 'done' ? 'hsl(var(--muted-foreground))' : 'hsl(var(--primary-foreground, 0 0% 100%))',
+                    border: state === 'done' ? '1px solid hsl(var(--border))' : '1px solid hsl(var(--primary))',
                   }}>{state === 'done' ? 'Відкрити' : s.cta}</a>
                 )}
               </div>
