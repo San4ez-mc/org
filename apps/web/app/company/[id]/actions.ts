@@ -139,6 +139,29 @@ export async function saveDriveExclusions(companyId: string, excludedIds: string
   return call(`/companies/${companyId}/drive-exclusions`, 'PATCH', { excludedIds });
 }
 
+export interface DriveIndexStatus {
+  running: boolean;
+  phase: 'idle' | 'listing' | 'reading' | 'done' | 'error';
+  total: number; processed: number; indexed: number;
+  startedAt: number | null; finishedAt: number | null; error: string | null;
+  etaSeconds: number | null;
+}
+
+/** #303 Запустити фонову індексацію робочої папки у вектор. */
+export async function startDriveIndex(companyId: string): Promise<{ started: boolean; error?: string }> {
+  try {
+    await call(`/companies/${companyId}/index-drive/start`, 'POST', {});
+    return { started: true };
+  } catch (e) {
+    return { started: false, error: (e as Error).message };
+  }
+}
+
+/** #303 Стан фонової індексації (для прогрес-бара). */
+export async function getDriveIndexStatus(companyId: string): Promise<DriveIndexStatus> {
+  return call(`/companies/${companyId}/index-drive/status`, 'GET');
+}
+
 /** Проаналізувати підключену папку: зіставити теки з одиницями + (опц.) індексація у вектор. */
 export async function analyzeDrive(companyId: string, index = true): Promise<AnalyzeReport> {
   const report = (await call(`/companies/${companyId}/analyze-drive`, 'POST', { index, author: 'пульт' })) as AnalyzeReport;

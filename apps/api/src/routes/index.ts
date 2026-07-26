@@ -6,6 +6,7 @@ import { stepsToMermaid } from '@platform/ai';
 import { requireApiSecret } from '../middleware/auth';
 import { handleAct } from '../services/agent';
 import { indexInstruction, findRelatedInstructions, indexDriveDocuments, vectorEnabled } from '../services/vector';
+import { startDriveIndex, getIndexProgress } from '../services/driveIndexer';
 
 /**
  * Контракт API платформи (§8 PLAN_PHASE1.md).
@@ -1785,6 +1786,35 @@ api.patch('/companies/:id/drive-exclusions', async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: String(err) });
   }
+});
+
+// #303 Запустити фонову індексацію робочої папки у вектор (поважає виключення).
+api.post('/companies/:id/index-drive/start', async (req, res) => {
+  try {
+    const company = await prisma.company.findUnique({
+      where: { id: req.params.id },
+      select: { driveRootFolderId: true, driveExcludedIds: true },
+    });
+    if (!company) return void res.status(404).json({ error: 'company not found' });
+    if (!company.driveRootFolderId) return void res.status(400).json({ error: 'no-drive-folder' });
+    const r = startDriveIndex(req.params.id, company.driveRootFolderId, company.driveExcludedIds ?? []);
+    if (!r.started) return void res.status(409).json({ error: r.reason });
+    res.json({ started: true, progress: getIndexProgress(req.params.id) });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+// #303 Стан фонової індексації (для прогрес-бара). Додає etaSeconds.
+api.get('/companies/:id/index-drive/status', async (req, res) => {
+  const p = getIndexProgress(req.params.id);
+  let etaSeconds: number | null = null;
+  if (p.running && p.processed > 0 && p.startedAt && p.total > 0) {
+    const elapsed = (Date.now() - p.startedAt) / 1000;
+    const perItem = elapsed / p.processed;
+    etaSeconds = Math.round(perItem * (p.total - p.processed));
+  }
+  res.json({ ...p, etaSeconds });
 });
 
 // #200/#276 Аналіз підключеної Drive-папки компанії: зіставити теки з орг-одиницями

@@ -8,6 +8,8 @@ export interface Company {
   abbr: string | null;
   driveRootFolderId: string | null;
   driveExcludedIds?: string[];
+  driveIndexedAt?: string | null;
+  driveIndexedCount?: number;
   orgSheetId: string | null;
   createdAt: string;
 }

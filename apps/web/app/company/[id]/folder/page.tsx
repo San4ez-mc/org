@@ -2,6 +2,7 @@ import { getCompany } from '@/lib/api';
 import CompanyHeader from '@/components/CompanyTabs';
 import DriveConnectPanel from '@/components/DriveConnectPanel';
 import DriveTreeManager from '@/components/DriveTreeManager';
+import DriveIndexPanel from '@/components/DriveIndexPanel';
 
 export const dynamic = 'force-dynamic';
 
@@ -22,6 +23,14 @@ export default async function CompanyFolder({ params }: { params: { id: string }
       <DriveConnectPanel companyId={company.id} driveRootFolderId={company.driveRootFolderId} />
       {/* #302 Коли папка прив'язана — дерево показуємо ЗАВЖДИ (виключення тут же). */}
       {company.driveRootFolderId && <DriveTreeManager companyId={company.id} />}
+      {/* #303 Крок 3: асинхронна індексація у вектор з прогресом. */}
+      {company.driveRootFolderId && (
+        <DriveIndexPanel
+          companyId={company.id}
+          indexedAt={company.driveIndexedAt ?? null}
+          indexedCount={company.driveIndexedCount ?? 0}
+        />
+      )}
     </div>
   );
 }

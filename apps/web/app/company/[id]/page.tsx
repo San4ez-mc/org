@@ -14,12 +14,13 @@ export default async function CompanyOverview({ params }: { params: { id: string
   const id = company.id;
   const hasFolder = !!company.driveRootFolderId;       // папка підключена
   const hasExclusions = (company.driveExcludedIds?.length ?? 0) > 0; // #302 хоч один файл виключено
+  const hasIndexed = !!company.driveIndexedAt; // #303 папку хоч раз проіндексовано
   const hasStructure = (company.orgUnits?.length ?? 0) > 0;  // агент побудував скелет
 
   const steps = [
     { n: 1, title: 'Підключити робочу папку компанії', desc: 'Google Drive: система прочитає файли й створюватиме посадові інструкції саме тут.', href: `/company/${id}/folder`, cta: 'Підключити папку', done: hasFolder, available: true },
     { n: 2, title: 'Виключити зайве з індексації', desc: 'У дереві файлів/папок познач ті, що система НЕ має читати (особисте, чернетки, архіви).', href: `/company/${id}/folder`, cta: 'Позначити зайве', done: hasExclusions, available: hasFolder },
-    { n: 3, title: 'Запустити індексацію у вектор', desc: 'Записати всі дозволені файли у вектор-базу + авто-визначення посад/інструкцій/процесів із документів.', href: `/company/${id}/folder`, cta: 'Індексувати', done: false, available: hasFolder },
+    { n: 3, title: 'Запустити індексацію у вектор', desc: 'Записати всі дозволені файли у вектор-базу + авто-визначення посад/інструкцій/процесів із документів.', href: `/company/${id}/folder`, cta: 'Індексувати', done: hasIndexed, available: hasFolder },
     { n: 4, title: 'AI-агент: інтервʼю → скелет структури', desc: 'Агент опитує про відділення, посади, команду і будує основну орг-структуру.', href: `/company/${id}/structure`, cta: 'Запустити агента', done: hasStructure, available: hasFolder },
   ];
   const doneCount = steps.filter((s) => s.done).length;

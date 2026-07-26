@@ -64,6 +64,8 @@ model Company {
   abbr              String? // скорочення-префікс (напр. "LB")
   driveRootFolderId String? // корінь папок компанії на Drive клієнта
   driveExcludedIds  String[] @default([]) // #302 id тек/файлів Drive, виключені з індексації
+  driveIndexedAt    DateTime? // #303 час останньої успішної індексації папки у вектор
+  driveIndexedCount Int       @default(0) // #303 к-ть проіндексованих файлів
   orgSheetId        String? // Google Sheet з оргсхемою
   googleAccountId   String? // прив'язаний OAuth Google-акаунт (для Drive/Sheets/Docs)
 
