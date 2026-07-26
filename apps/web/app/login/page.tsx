@@ -10,9 +10,9 @@ export default function LoginPage({ searchParams }: { searchParams: { e?: string
         position: 'relative', overflow: 'hidden',
         // Фон: згенероване зображення (поклади у public/login-bg.png) + градієнт-підкладка
         backgroundImage:
-          "radial-gradient(1200px 600px at 20% 10%, hsl(220 70% 15% / 0.55), transparent), " +
-          "radial-gradient(900px 500px at 90% 90%, hsl(280 60% 18% / 0.5), transparent), " +
-          "linear-gradient(135deg, hsl(222 47% 6%), hsl(222 47% 9%)), " +
+          "radial-gradient(1200px 600px at 20% 10%, hsl(220 70% 15% / 0.35), transparent), " +
+          "radial-gradient(900px 500px at 90% 90%, hsl(280 60% 18% / 0.3), transparent), " +
+          "linear-gradient(135deg, hsl(222 47% 6% / 0.55), hsl(222 47% 9% / 0.62)), " +
           "url('/login-bg.png')",
         backgroundSize: 'cover, cover, cover, cover',
         backgroundPosition: 'center',
