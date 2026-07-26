@@ -12,16 +12,14 @@ export default async function CompanyOverview({ params }: { params: { id: string
   }
 
   const id = company.id;
-  const s1 = !!company.driveRootFolderId;              // папка підключена
-  const s2 = (company.orgUnits?.length ?? 0) > 0;      // є орг-структура
-  const s3 = (company.processes?.length ?? 0) > 0;     // є процеси
-  const s4 = false;                                    // інструкції (створюються на Drive)
+  const hasFolder = !!company.driveRootFolderId;       // папка підключена
+  const hasStructure = (company.orgUnits?.length ?? 0) > 0;  // агент побудував скелет
 
   const steps = [
-    { n: 1, title: 'Підключити робочу папку компанії', desc: 'Google Drive: система прочитає й проіндексує файли, і саме туди створюватиме посадові інструкції.', href: `/company/${id}/folder`, cta: 'Підключити папку', done: s1, available: true },
-    { n: 2, title: 'Створити орг-структуру', desc: 'Відділення, посади, ЦКП — через бота-агента або імпорт.', href: `/company/${id}/structure`, cta: 'До структури', done: s2, available: s1 },
-    { n: 3, title: 'Описати бізнес-процеси', desc: 'Хто за що відповідає, кроки процесів.', href: `/company/${id}/processes`, cta: 'До процесів', done: s3, available: s2 },
-    { n: 4, title: 'Посадові інструкції', desc: 'Створюються на Google Drive у підключеній папці, привʼязані до посад.', href: `/company/${id}/instructions`, cta: 'До інструкцій', done: s4, available: s3 },
+    { n: 1, title: 'Підключити робочу папку компанії', desc: 'Google Drive: система прочитає файли й створюватиме посадові інструкції саме тут.', href: `/company/${id}/folder`, cta: 'Підключити папку', done: hasFolder, available: true },
+    { n: 2, title: 'Виключити зайве з індексації', desc: 'У дереві файлів/папок познач ті, що система НЕ має читати (особисте, чернетки, архіви).', href: `/company/${id}/folder`, cta: 'Позначити зайве', done: false, available: hasFolder },
+    { n: 3, title: 'Запустити індексацію у вектор', desc: 'Записати всі дозволені файли у вектор-базу + авто-визначення посад/інструкцій/процесів із документів.', href: `/company/${id}/folder`, cta: 'Індексувати', done: false, available: hasFolder },
+    { n: 4, title: 'AI-агент: інтервʼю → скелет структури', desc: 'Агент опитує про відділення, посади, команду і будує основну орг-структуру.', href: `/company/${id}/structure`, cta: 'Запустити агента', done: hasStructure, available: hasFolder },
   ];
   const doneCount = steps.filter((s) => s.done).length;
 
