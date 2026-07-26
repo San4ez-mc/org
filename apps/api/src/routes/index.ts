@@ -1780,14 +1780,31 @@ api.post('/companies/:id/analyze-drive', async (req, res) => {
         for (const n of nodes) if (n.isFolder) { const p = `${path}/${n.name}`; foldersFlat.push({ name: n.name, path: p }); if (n.children) collect(n.children, p); }
       };
       collect(tree, '');
+      // Індексуємо файли У ВЕКТОР ЗАВЖДИ (навіть без орг-структури): з наявних документів
+      // потім можна витягти посади/інструкції, і семантичний пошук працює одразу.
+      let indexedFiles = 0;
+      let indexSkippedReason: string | null = null;
+      if (req.body?.index !== false) {
+        if (!vectorEnabled()) {
+          indexSkippedReason = 'vector-disabled (VECTOR_TOKEN не задано)';
+        } else {
+          const files = await listFolderFiles(company.driveRootFolderId);
+          const docs: { source: string; content: string; driveFileId: string; path: string }[] = [];
+          for (const f of files) {
+            const text = await readFileText(f);
+            if (text && text.trim()) docs.push({ source: f.name, content: text, driveFileId: f.id, path: f.name });
+          }
+          indexedFiles = await indexDriveDocuments(companyId, docs);
+        }
+      }
       return void res.json({
         company: { id: company.id, name: company.name, driveRootFolderId: company.driveRootFolderId },
         tree,
         structureNote: 'no-org-structure',
-        structureHint: `У компанії «${company.name}» ще немає орг-структури, тож зіставляти теки нема з чим. Спершу створіть структуру (бот/імпорт) — або підключіть цю папку до компанії, у якої структура вже є. Знайдено ${foldersFlat.length} тек на Диску.`,
+        structureHint: `Файли Диску проіндексовано у вектор-базу (${indexedFiles}) — семантичний пошук уже працює. Орг-структури ще нема, тож теки не зіставлялись; створи структуру (крок 2), і теки зіставляться з одиницями. Знайдено ${foldersFlat.length} тек.`,
         changePlan: { linked: [], renameSuggestions: [], createSuggestions: [], extraFolders: foldersFlat.map((f) => ({ name: f.name, path: f.path, folderId: '' })) },
-        instructionDocs: [], indexedFiles: 0, indexSkippedReason: 'no-org-structure',
-        summary: { linked: 0, renameSuggestions: 0, createSuggestions: 0, extraFolders: foldersFlat.length, instructionDocs: 0, indexedFiles: 0 },
+        instructionDocs: [], indexedFiles, indexSkippedReason,
+        summary: { linked: 0, renameSuggestions: 0, createSuggestions: 0, extraFolders: foldersFlat.length, instructionDocs: 0, indexedFiles },
       });
     }
 
