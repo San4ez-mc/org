@@ -83,7 +83,17 @@ export default function DriveTreeManager({ companyId }: { companyId: string }) {
         Виключення теки поширюється на весь її вміст. Зміни зберігаються автоматично.
       </p>
 
-      {loading && <p style={{ fontSize: 13, color: 'hsl(var(--muted-foreground))' }}>⏳ Читаю структуру папки з Google Drive…</p>}
+      {loading && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '28px 4px', color: 'hsl(var(--muted-foreground))', fontSize: 13 }}>
+          <span style={{
+            width: 20, height: 20, flexShrink: 0, borderRadius: '50%',
+            border: '2.5px solid hsl(var(--muted))', borderTopColor: 'hsl(var(--primary))',
+            display: 'inline-block', animation: 'dtm-spin 0.8s linear infinite',
+          }} />
+          <span>Читаю структуру папки з Google Drive… (велика папка може вантажитись кілька секунд)</span>
+          <style>{`@keyframes dtm-spin { to { transform: rotate(360deg); } }`}</style>
+        </div>
+      )}
       {err && <p style={{ color: 'hsl(0 70% 60%)', fontSize: 12.5 }}>{err}</p>}
 
       {tree && !loading && (
