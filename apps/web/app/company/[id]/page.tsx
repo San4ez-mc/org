@@ -13,11 +13,12 @@ export default async function CompanyOverview({ params }: { params: { id: string
 
   const id = company.id;
   const hasFolder = !!company.driveRootFolderId;       // папка підключена
+  const hasExclusions = (company.driveExcludedIds?.length ?? 0) > 0; // #302 хоч один файл виключено
   const hasStructure = (company.orgUnits?.length ?? 0) > 0;  // агент побудував скелет
 
   const steps = [
     { n: 1, title: 'Підключити робочу папку компанії', desc: 'Google Drive: система прочитає файли й створюватиме посадові інструкції саме тут.', href: `/company/${id}/folder`, cta: 'Підключити папку', done: hasFolder, available: true },
-    { n: 2, title: 'Виключити зайве з індексації', desc: 'У дереві файлів/папок познач ті, що система НЕ має читати (особисте, чернетки, архіви).', href: `/company/${id}/folder`, cta: 'Позначити зайве', done: false, available: hasFolder },
+    { n: 2, title: 'Виключити зайве з індексації', desc: 'У дереві файлів/папок познач ті, що система НЕ має читати (особисте, чернетки, архіви).', href: `/company/${id}/folder`, cta: 'Позначити зайве', done: hasExclusions, available: hasFolder },
     { n: 3, title: 'Запустити індексацію у вектор', desc: 'Записати всі дозволені файли у вектор-базу + авто-визначення посад/інструкцій/процесів із документів.', href: `/company/${id}/folder`, cta: 'Індексувати', done: false, available: hasFolder },
     { n: 4, title: 'AI-агент: інтервʼю → скелет структури', desc: 'Агент опитує про відділення, посади, команду і будує основну орг-структуру.', href: `/company/${id}/structure`, cta: 'Запустити агента', done: hasStructure, available: hasFolder },
   ];
@@ -43,19 +44,18 @@ export default async function CompanyOverview({ params }: { params: { id: string
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           {steps.map((s) => {
             const state = s.done ? 'done' : s.available ? 'active' : 'locked';
-            const border = state === 'done' ? 'hsl(142 40% 30% / 0.6)' : state === 'active' ? 'hsl(var(--primary) / 0.5)' : 'hsl(var(--border))';
+            const border = state === 'done' ? 'hsl(142 40% 30% / 0.5)' : state === 'active' ? 'hsl(var(--border))' : 'hsl(var(--border))';
             return (
               <div key={s.n} style={{
                 display: 'flex', gap: 14, alignItems: 'center', padding: '16px 18px',
                 background: 'hsl(var(--card))', border: `1px solid ${border}`, borderRadius: 14,
                 opacity: state === 'locked' ? 0.5 : 1,
-                boxShadow: state === 'active' ? '0 0 0 1px hsl(var(--primary) / 0.12)' : 'none',
               }}>
                 <div style={{
                   width: 32, height: 32, borderRadius: '50%', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
                   fontSize: 14, fontWeight: 700,
-                  background: state === 'done' ? 'hsl(142 45% 32%)' : state === 'active' ? 'hsl(var(--primary))' : 'hsl(var(--muted))',
-                  color: state === 'locked' ? 'hsl(var(--muted-foreground))' : '#fff',
+                  background: state === 'done' ? 'hsl(142 45% 32%)' : state === 'active' ? 'hsl(var(--foreground) / 0.14)' : 'hsl(var(--muted))',
+                  color: state === 'done' ? '#fff' : state === 'active' ? 'hsl(var(--foreground))' : 'hsl(var(--muted-foreground))',
                 }}>{state === 'done' ? '✓' : state === 'locked' ? '🔒' : s.n}</div>
 
                 <div style={{ flex: 1, minWidth: 0 }}>
@@ -68,9 +68,9 @@ export default async function CompanyOverview({ params }: { params: { id: string
                     flexShrink: 0, textAlign: 'center', minWidth: 128, boxSizing: 'border-box',
                     textDecoration: 'none', fontSize: 13, fontWeight: 600, letterSpacing: 0.1,
                     padding: '9px 16px', borderRadius: 9,
-                    background: state === 'done' ? 'transparent' : 'hsl(var(--primary))',
-                    color: state === 'done' ? 'hsl(var(--muted-foreground))' : 'hsl(var(--primary-foreground, 0 0% 100%))',
-                    border: state === 'done' ? '1px solid hsl(var(--border))' : '1px solid hsl(var(--primary))',
+                    background: state === 'done' ? 'transparent' : 'hsl(var(--foreground) / 0.10)',
+                    color: state === 'done' ? 'hsl(var(--muted-foreground))' : 'hsl(var(--foreground))',
+                    border: '1px solid hsl(var(--border))',
                   }}>{state === 'done' ? 'Відкрити' : s.cta}</a>
                 )}
               </div>

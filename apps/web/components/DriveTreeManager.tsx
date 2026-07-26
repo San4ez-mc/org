@@ -149,7 +149,7 @@ function Row({ node, level, excluded, ancestorExcluded, onToggle }: {
         <a
           href={node.webViewLink ?? (node.isFolder ? `https://drive.google.com/drive/folders/${node.id}` : `https://drive.google.com/file/d/${node.id}/view`)}
           target="_blank"
-          style={{ flex: 1, minWidth: 0, textDecoration: off ? 'line-through' : 'none', color: off ? 'hsl(var(--muted-foreground))' : (node.isFolder ? 'inherit' : 'hsl(var(--primary))'), fontWeight: node.isFolder ? 500 : 400, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
+          style={{ flex: 1, minWidth: 0, textDecoration: off ? 'line-through' : 'none', color: off ? 'hsl(var(--muted-foreground))' : (node.isFolder ? 'hsl(var(--foreground))' : 'hsl(210 15% 72%)'), fontWeight: node.isFolder ? 500 : 400, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
         >
           {node.name}
         </a>
@@ -159,7 +159,7 @@ function Row({ node, level, excluded, ancestorExcluded, onToggle }: {
         {ancestorExcluded ? (
           <span title="виключено разом із текою-предком" style={{
             flexShrink: 0, fontSize: 11.5, fontWeight: 600, padding: '3px 9px', borderRadius: 999,
-            background: 'hsl(0 60% 45% / 0.12)', color: 'hsl(0 65% 62%)', border: '1px solid hsl(0 60% 45% / 0.3)',
+            background: 'hsl(220 12% 26% / 0.6)', color: 'hsl(220 10% 70%)', border: '1px solid hsl(var(--border))',
           }}>🚫 виключено</span>
         ) : (
           <button
@@ -167,9 +167,9 @@ function Row({ node, level, excluded, ancestorExcluded, onToggle }: {
             title={selfExcluded ? 'Повернути в індексацію' : 'Виключити з індексації'}
             style={{
               flexShrink: 0, cursor: 'pointer', fontSize: 11.5, fontWeight: 600, padding: '3px 9px', borderRadius: 999,
-              background: selfExcluded ? 'hsl(0 65% 48%)' : 'transparent',
-              color: selfExcluded ? '#fff' : 'hsl(var(--muted-foreground))',
-              border: selfExcluded ? '1px solid hsl(0 65% 48%)' : '1px solid hsl(var(--border))',
+              background: selfExcluded ? 'hsl(220 14% 30%)' : 'transparent',
+              color: selfExcluded ? 'hsl(220 12% 88%)' : 'hsl(var(--muted-foreground))',
+              border: '1px solid hsl(var(--border))',
             }}
           >
             {selfExcluded ? '🚫 виключено' : 'виключити'}

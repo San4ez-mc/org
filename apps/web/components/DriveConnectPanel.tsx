@@ -9,10 +9,10 @@ const card: React.CSSProperties = {
   borderRadius: 'var(--radius)', padding: 16, margin: '16px 0',
 };
 const btn: React.CSSProperties = {
-  background: 'hsl(var(--primary))', color: 'hsl(var(--primary-foreground))',
-  border: 'none', borderRadius: 8, padding: '8px 14px', fontSize: 13.5, cursor: 'pointer',
+  background: 'hsl(var(--foreground) / 0.10)', color: 'hsl(var(--foreground))',
+  border: '1px solid hsl(var(--border))', borderRadius: 9, padding: '9px 16px', fontSize: 13, fontWeight: 600, cursor: 'pointer',
 };
-const secBtn: React.CSSProperties = { ...btn, background: 'transparent', color: 'hsl(var(--foreground))', border: '1px solid hsl(var(--border))' };
+const secBtn: React.CSSProperties = { ...btn, background: 'transparent', color: 'hsl(var(--muted-foreground))' };
 
 export default function DriveConnectPanel({ companyId, driveRootFolderId }: { companyId: string; driveRootFolderId: string | null }) {
   const [connected, setConnected] = useState<string | null>(driveRootFolderId);
@@ -85,7 +85,7 @@ export default function DriveConnectPanel({ companyId, driveRootFolderId }: { co
             <input type="checkbox" checked={index} onChange={(e) => setIndex(e.target.checked)} /> індексувати файли у вектор-базу
           </label>
           <button style={btn} onClick={doAnalyze} disabled={pending}>
-            {phase === 'analyzing' ? 'Аналізую…' : '🔍 Проаналізувати папку'}
+            {phase === 'analyzing' ? 'Читаю…' : '📋 Отримати список файлів та папок'}
           </button>
           <button style={secBtn} onClick={disconnect} disabled={pending}>Відв'язати</button>
         </div>
