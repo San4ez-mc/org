@@ -272,7 +272,46 @@ export async function listFolderTree(folderId: string, depth = 6): Promise<Drive
   return entries;
 }
 
-/** Прочитати текст файлу: Google Doc → export text/plain; text/* → media. Інакше null. */
+const SHEET_TEXT_CAP = 60000; // #303 обмеження тексту таблиці, щоб не роздути вектор
+
+/** Прочитати Google Sheet у текст: усі вкладки, рядки у форму "Заголовок: значення | …".
+ *  Перший рядок кожної вкладки — заголовки-контекст. Порожні вкладки/рядки пропускаємо. */
+async function readSheetText(fileId: string): Promise<string | null> {
+  const sheets = getSheets();
+  const meta = await withRetry(() => sheets.spreadsheets.get({ spreadsheetId: fileId }));
+  const parts: string[] = [];
+  for (const t of meta.data.sheets ?? []) {
+    const title = t.properties?.title ?? 'Аркуш';
+    const vr = await withRetry(() =>
+      sheets.spreadsheets.values.get({ spreadsheetId: fileId, range: `'${title.replace(/'/g, "''")}'` }),
+    );
+    const rows = (vr.data.values ?? []) as unknown[][];
+    if (!rows.length) continue;
+    const header = (rows[0] ?? []).map((c) => String(c ?? '').trim());
+    const hasHeader = header.filter(Boolean).length >= 2;
+    const lines: string[] = [`# Вкладка: ${title}`];
+    for (let i = hasHeader ? 1 : 0; i < rows.length; i++) {
+      const row = rows[i] ?? [];
+      if (!row.some((c) => String(c ?? '').trim())) continue; // порожній рядок
+      const cells = row
+        .map((c, j) => {
+          const v = String(c ?? '').trim();
+          if (!v) return '';
+          const h = hasHeader ? header[j] : '';
+          return h ? `${h}: ${v}` : v;
+        })
+        .filter(Boolean);
+      if (cells.length) lines.push(cells.join(' | '));
+    }
+    if (lines.length > 1) parts.push(lines.join('\n'));
+  }
+  const text = parts.join('\n\n').trim();
+  if (!text) return null;
+  return text.length > SHEET_TEXT_CAP ? text.slice(0, SHEET_TEXT_CAP) + '\n…(обрізано)' : text;
+}
+
+/** Прочитати текст файлу: Google Doc → export text/plain; Google Sheet → усі вкладки;
+ *  text/* → media. Інакше null. */
 export async function readFileText(file: DriveFileInfo): Promise<string | null> {
   const drive = getDrive();
   try {
@@ -281,6 +320,9 @@ export async function readFileText(file: DriveFileInfo): Promise<string | null> 
         drive.files.export({ fileId: file.id, mimeType: 'text/plain' }, { responseType: 'text' }),
       );
       return String(res.data ?? '').trim() || null;
+    }
+    if (file.mimeType === SHEET_MIME) {
+      return await readSheetText(file.id);
     }
     if (file.mimeType.startsWith('text/')) {
       const res = await withRetry(() =>

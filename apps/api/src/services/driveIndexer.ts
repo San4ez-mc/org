@@ -3,7 +3,7 @@
 // тримає прогрес у пам'яті процесу (org-api — один pm2-процес). Стійко до відмов:
 // падіння окремого файлу не зупиняє індексацію.
 import { listFolderTree, readFileText, type DriveNode, type DriveFileInfo } from '@platform/drive';
-import { indexDriveDocuments, vectorEnabled } from './vector';
+import { indexDriveDocuments, indexDriveStructure, vectorEnabled } from './vector';
 import { prisma } from '@platform/db';
 
 export interface IndexProgress {
@@ -38,6 +38,21 @@ function collectFiles(nodes: DriveNode[], excluded: Set<string>): DriveFileInfo[
   return out;
 }
 
+/** #303 (3b) Текстовий опис ієрархії тек (лише невиключені) — відступами. */
+function buildStructureText(nodes: DriveNode[], excluded: Set<string>): string {
+  const lines: string[] = ['Ієрархія папок компанії (для розуміння орг-структури):'];
+  const walk = (ns: DriveNode[], depth: number) => {
+    for (const n of ns) {
+      if (excluded.has(n.id)) continue;
+      if (!n.isFolder) continue; // лише теки — це структура
+      lines.push('  '.repeat(depth) + '- ' + n.name);
+      if (n.children) walk(n.children, depth + 1);
+    }
+  };
+  walk(nodes, 0);
+  return lines.join('\n');
+}
+
 /** Запустити фонову індексацію. Повертає одразу; прогрес — через getIndexProgress. */
 export function startDriveIndex(companyId: string, folderId: string, excludedIds: string[]): { started: boolean; reason?: string } {
   const cur = progressMap.get(companyId);
@@ -66,6 +81,9 @@ export function startDriveIndex(companyId: string, folderId: string, excludedIds
         if (batch.length >= BATCH) { p.indexed += await indexDriveDocuments(companyId, batch); batch = []; }
       }
       if (batch.length) p.indexed += await indexDriveDocuments(companyId, batch);
+
+      // #303 (3b) Проіндексувати саму структуру папок (крім виключених)
+      try { await indexDriveStructure(companyId, buildStructureText(tree, excl)); } catch { /* не критично */ }
 
       p.phase = 'done';
       p.running = false;

@@ -68,6 +68,17 @@ export async function indexDriveDocuments(
   return ingested;
 }
 
+/** #303 (3b) Проіндексувати текстовий опис ієрархії папок компанії (колекція static).
+ *  Дає семантичний доступ до самої структури (які відділи/посади вже є за теками). */
+export async function indexDriveStructure(companyId: string, content: string): Promise<number> {
+  if (!content.trim()) return 0;
+  const r = await call('/ingest', {
+    collection: 'static',
+    chunks: [{ source: 'Структура папок компанії', content, metadata: { companyId, kind: 'folder-structure' } }],
+  });
+  return r && typeof r.ingested === 'number' ? r.ingested : 0;
+}
+
 /** Знайти семантично повʼязані інструкції (у межах компанії), крім самої. */
 export async function findRelatedInstructions(
   companyId: string, text: string, excludeInstructionId: string, opts?: { limit?: number; minScore?: number },
