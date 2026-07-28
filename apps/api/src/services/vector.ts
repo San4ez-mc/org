@@ -10,12 +10,45 @@ export function vectorEnabled(): boolean {
   return Boolean(VECTOR_TOKEN);
 }
 
-async function call(path: string, body: unknown): Promise<any | null> {
-  if (!VECTOR_TOKEN) return null;
+/** #306 Створити власний проєкт компанії у vector-базі (POST /projects — без токена). */
+export async function createVectorProject(name: string, driveFolderId?: string): Promise<{ projectId: string; rootToken: string } | null> {
+  try {
+    const res = await fetch(`${VECTOR_URL}/projects`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, driveFolderId: driveFolderId || '' }),
+    });
+    if (!res.ok) return null;
+    const j = await res.json();
+    return j?.rootToken ? { projectId: j.project?.id, rootToken: j.rootToken } : null;
+  } catch { return null; }
+}
+
+/** #306 Створити під-токен, обмежений на конкретні папки (folderScope). */
+export async function createSubToken(projectId: string, folderScope: string[], label: string): Promise<{ token: string } | null> {
+  try {
+    const res = await fetch(`${VECTOR_URL}/projects/${projectId}/tokens`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ folderScope, label }),
+    });
+    if (!res.ok) return null;
+    const j = await res.json();
+    return j?.token ? { token: j.token } : null;
+  } catch { return null; }
+}
+
+/** #306 Семантичний пошук у проєкті компанії (за її токеном). */
+export async function vectorSearch(token: string, query: string, limit = 6): Promise<{ results: any[] } | null> {
+  return call('/search', { query, limit }, token);
+}
+
+async function call(path: string, body: unknown, token: string = VECTOR_TOKEN): Promise<any | null> {
+  if (!token) return null;
   try {
     const res = await fetch(`${VECTOR_URL}${path}`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${VECTOR_TOKEN}` },
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
       body: JSON.stringify(body),
     });
     if (!res.ok) {
@@ -51,18 +84,20 @@ export async function indexInstruction(instr: {
  *  Повертає к-ть успішно проіндексованих чанків. */
 export async function indexDriveDocuments(
   companyId: string,
-  docs: { source: string; content: string; driveFileId: string; path: string }[],
+  docs: { source: string; content: string; driveFileId: string; path: string; folderId?: string }[],
+  token: string = VECTOR_TOKEN,
 ): Promise<number> {
   if (!docs.length) return 0;
   const chunks = docs.map((d) => ({
     source: d.source,
     content: d.content,
+    folderId: d.folderId || '', // #306 пряма батьківська тека — для токенів-на-папку
     metadata: { companyId, driveFileId: d.driveFileId, path: d.path, kind: 'drive-file' },
   }));
   let ingested = 0;
   const BATCH = 20;
   for (let i = 0; i < chunks.length; i += BATCH) {
-    const r = await call('/ingest', { collection: 'dynamic', chunks: chunks.slice(i, i + BATCH) });
+    const r = await call('/ingest', { collection: 'dynamic', chunks: chunks.slice(i, i + BATCH) }, token);
     if (r && typeof r.ingested === 'number') ingested += r.ingested;
   }
   return ingested;
@@ -70,12 +105,12 @@ export async function indexDriveDocuments(
 
 /** #303 (3b) Проіндексувати текстовий опис ієрархії папок компанії (колекція static).
  *  Дає семантичний доступ до самої структури (які відділи/посади вже є за теками). */
-export async function indexDriveStructure(companyId: string, content: string): Promise<number> {
+export async function indexDriveStructure(companyId: string, content: string, token: string = VECTOR_TOKEN): Promise<number> {
   if (!content.trim()) return 0;
   const r = await call('/ingest', {
     collection: 'static',
-    chunks: [{ source: 'Структура папок компанії', content, metadata: { companyId, kind: 'folder-structure' } }],
-  });
+    chunks: [{ source: 'Структура папок компанії', content, folderId: '', metadata: { companyId, kind: 'folder-structure' } }],
+  }, token);
   return r && typeof r.ingested === 'number' ? r.ingested : 0;
 }
 
