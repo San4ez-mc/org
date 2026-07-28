@@ -43,6 +43,24 @@ export async function vectorSearch(token: string, query: string, limit = 6): Pro
   return call('/search', { query, limit }, token);
 }
 
+/** #307 Список токенів проєкту компанії. */
+export async function listVectorTokens(projectId: string): Promise<any[] | null> {
+  try {
+    const res = await fetch(`${VECTOR_URL}/projects/${projectId}/tokens`);
+    if (!res.ok) return null;
+    const j: any = await res.json();
+    return Array.isArray(j?.tokens) ? j.tokens : [];
+  } catch { return null; }
+}
+
+/** #307 Видалити під-токен проєкту компанії. */
+export async function deleteVectorToken(projectId: string, token: string): Promise<boolean> {
+  try {
+    const res = await fetch(`${VECTOR_URL}/projects/${projectId}/tokens/${encodeURIComponent(token)}`, { method: 'DELETE' });
+    return res.ok;
+  } catch { return false; }
+}
+
 async function call(path: string, body: unknown, token: string = VECTOR_TOKEN): Promise<any | null> {
   if (!token) return null;
   try {

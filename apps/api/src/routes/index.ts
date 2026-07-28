@@ -5,7 +5,7 @@ import { findFolderByName, listFolderTree, listFolderFiles, readFileText, type D
 import { stepsToMermaid } from '@platform/ai';
 import { requireApiSecret } from '../middleware/auth';
 import { handleAct } from '../services/agent';
-import { indexInstruction, findRelatedInstructions, indexDriveDocuments, vectorEnabled } from '../services/vector';
+import { indexInstruction, findRelatedInstructions, indexDriveDocuments, vectorEnabled, createSubToken, listVectorTokens, deleteVectorToken } from '../services/vector';
 import { startDriveIndex, getIndexProgress } from '../services/driveIndexer';
 
 /**
@@ -1815,6 +1815,57 @@ api.get('/companies/:id/index-drive/status', async (req, res) => {
     etaSeconds = Math.round(perItem * (p.total - p.processed));
   }
   res.json({ ...p, etaSeconds });
+});
+
+// #307 expandFolderScope — обрана тека + УСІ її нащадки (чанки несуть folder_id прямої теки).
+function expandFolderScope(tree: DriveNode[], selected: Set<string>): string[] {
+  const out = new Set<string>();
+  const addSubtree = (n: DriveNode) => { if (!n.isFolder) return; out.add(n.id); for (const ch of n.children ?? []) addSubtree(ch); };
+  const walk = (nodes: DriveNode[]) => {
+    for (const n of nodes) {
+      if (!n.isFolder) continue;
+      if (selected.has(n.id)) addSubtree(n);
+      else walk(n.children ?? []);
+    }
+  };
+  walk(tree);
+  return [...out];
+}
+
+// #307 Токени компанії у vector-базі (проксі до власного проєкту компанії)
+api.get('/companies/:id/vector/tokens', async (req, res) => {
+  try {
+    const c = await prisma.company.findUnique({ where: { id: req.params.id }, select: { vectorProjectId: true } });
+    if (!c?.vectorProjectId) return void res.json({ tokens: [], connected: false });
+    const tokens = await listVectorTokens(c.vectorProjectId);
+    res.json({ tokens: tokens ?? [], connected: true });
+  } catch (err) { res.status(500).json({ error: String(err) }); }
+});
+
+api.post('/companies/:id/vector/tokens', async (req, res) => {
+  try {
+    const c = await prisma.company.findUnique({ where: { id: req.params.id }, select: { vectorProjectId: true, driveRootFolderId: true } });
+    if (!c?.vectorProjectId) return void res.status(400).json({ error: 'no-vector-project' });
+    const folderIds = Array.isArray(req.body?.folderIds) ? req.body.folderIds.map(String) : [];
+    const label = String(req.body?.label || 'sub').slice(0, 80);
+    if (!folderIds.length) return void res.status(400).json({ error: 'folderIds[] обовʼязкове' });
+    let scope = folderIds;
+    if (c.driveRootFolderId) {
+      try { scope = expandFolderScope(await listFolderTree(c.driveRootFolderId), new Set(folderIds)); } catch { /* без розкриття */ }
+    }
+    const r = await createSubToken(c.vectorProjectId, scope.length ? scope : folderIds, label);
+    if (!r) return void res.status(502).json({ error: 'vector-error' });
+    res.json({ token: r.token, folderScope: scope, label });
+  } catch (err) { res.status(500).json({ error: String(err) }); }
+});
+
+api.delete('/companies/:id/vector/tokens/:token', async (req, res) => {
+  try {
+    const c = await prisma.company.findUnique({ where: { id: req.params.id }, select: { vectorProjectId: true } });
+    if (!c?.vectorProjectId) return void res.status(400).json({ error: 'no-vector-project' });
+    const ok = await deleteVectorToken(c.vectorProjectId, req.params.token);
+    res.json({ deleted: ok });
+  } catch (err) { res.status(500).json({ error: String(err) }); }
 });
 
 // #200/#276 Аналіз підключеної Drive-папки компанії: зіставити теки з орг-одиницями

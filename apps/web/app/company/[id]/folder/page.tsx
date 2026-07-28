@@ -3,6 +3,7 @@ import CompanyHeader from '@/components/CompanyTabs';
 import DriveConnectPanel from '@/components/DriveConnectPanel';
 import DriveTreeManager from '@/components/DriveTreeManager';
 import DriveIndexPanel from '@/components/DriveIndexPanel';
+import VectorTokensPanel from '@/components/VectorTokensPanel';
 
 export const dynamic = 'force-dynamic';
 
@@ -31,6 +32,8 @@ export default async function CompanyFolder({ params }: { params: { id: string }
           indexedCount={company.driveIndexedCount ?? 0}
         />
       )}
+      {/* #307 Крок 3 (Фаза 3): токени доступу до бази знань — folder-scoped. */}
+      {company.driveRootFolderId && <VectorTokensPanel companyId={company.id} />}
     </div>
   );
 }

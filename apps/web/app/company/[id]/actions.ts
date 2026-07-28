@@ -162,6 +162,23 @@ export async function getDriveIndexStatus(companyId: string): Promise<DriveIndex
   return call(`/companies/${companyId}/index-drive/status`, 'GET');
 }
 
+export interface VectorTokenRow { token: string; label: string; folderScope: string[] | null; isRoot: boolean; createdAt?: string }
+
+/** #307 Список токенів компанії у vector-базі. */
+export async function getVectorTokens(companyId: string): Promise<{ tokens: VectorTokenRow[]; connected: boolean }> {
+  return call(`/companies/${companyId}/vector/tokens`, 'GET');
+}
+
+/** #307 Створити токен, обмежений на вибрані папки (+ їх нащадки). */
+export async function createVectorToken(companyId: string, folderIds: string[], label: string): Promise<{ token: string; folderScope: string[]; label: string }> {
+  return call(`/companies/${companyId}/vector/tokens`, 'POST', { folderIds, label });
+}
+
+/** #307 Видалити під-токен. */
+export async function deleteVectorToken(companyId: string, token: string): Promise<{ deleted: boolean }> {
+  return call(`/companies/${companyId}/vector/tokens/${encodeURIComponent(token)}`, 'DELETE');
+}
+
 /** Проаналізувати підключену папку: зіставити теки з одиницями + (опц.) індексація у вектор. */
 export async function analyzeDrive(companyId: string, index = true): Promise<AnalyzeReport> {
   const report = (await call(`/companies/${companyId}/analyze-drive`, 'POST', { index, author: 'пульт' })) as AnalyzeReport;
