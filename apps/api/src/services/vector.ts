@@ -19,7 +19,7 @@ export async function createVectorProject(name: string, driveFolderId?: string):
       body: JSON.stringify({ name, driveFolderId: driveFolderId || '' }),
     });
     if (!res.ok) return null;
-    const j = await res.json();
+    const j: any = await res.json();
     return j?.rootToken ? { projectId: j.project?.id, rootToken: j.rootToken } : null;
   } catch { return null; }
 }
@@ -33,7 +33,7 @@ export async function createSubToken(projectId: string, folderScope: string[], l
       body: JSON.stringify({ folderScope, label }),
     });
     if (!res.ok) return null;
-    const j = await res.json();
+    const j: any = await res.json();
     return j?.token ? { token: j.token } : null;
   } catch { return null; }
 }
