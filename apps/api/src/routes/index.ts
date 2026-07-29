@@ -1935,6 +1935,46 @@ api.get('/companies/:id/structure-proposal', async (req, res) => {
   } catch (err) { res.status(500).json({ error: String(err) }); }
 });
 
+// #311 (3e-2) Зберегти відредаговану пропозицію (перейменування/додавання/видалення тек).
+api.patch('/companies/:id/structure-proposal', async (req, res) => {
+  try {
+    const structure = req.body?.structure;
+    if (!Array.isArray(structure)) return void res.status(400).json({ error: 'structure[] обовʼязкове' });
+    const c = await prisma.company.findUnique({ where: { id: req.params.id }, select: { structureProposal: true } });
+    const prev = (c?.structureProposal as any) || {};
+    await prisma.company.update({ where: { id: req.params.id }, data: { structureProposal: { ...prev, structure, editedAt: new Date().toISOString() } } });
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: String(err) }); }
+});
+
+// #311 (3e-3, безпечна частина) Застосувати структуру = СТВОРИТИ теки на Диску (ensureFolder, ідемпотентно).
+// НЕ переміщує наявні файли (це ризикована окрема фаза). Лог створеного — для відкату.
+api.post('/companies/:id/apply-structure', async (req, res) => {
+  try {
+    const c = await prisma.company.findUnique({ where: { id: req.params.id }, select: { driveRootFolderId: true, structureProposal: true } });
+    if (!c?.driveRootFolderId) return void res.status(400).json({ error: 'no-drive-folder' });
+    const proposal = c.structureProposal as any;
+    if (!proposal?.structure?.length) return void res.status(400).json({ error: 'no-proposal' });
+
+    const created: { name: string; path: string; id: string }[] = [];
+    const walk = async (nodes: any[], parentId: string, path: string) => {
+      for (const n of nodes) {
+        if (n.type && n.type !== 'folder') continue; // Таблиці/Документи поки не створюємо
+        const id = await ensureFolder(parentId, String(n.name).slice(0, 120));
+        const p = `${path}/${n.name}`;
+        created.push({ name: n.name, path: p, id });
+        if (Array.isArray(n.children) && n.children.length) await walk(n.children, id, p);
+      }
+    };
+    await walk(proposal.structure, c.driveRootFolderId, '');
+
+    const applyLog = { appliedAt: new Date().toISOString(), createdCount: created.length, created };
+    await prisma.company.update({ where: { id: req.params.id }, data: { structureProposal: { ...proposal, applyLog } } });
+    await prisma.changeLog.create({ data: { companyId: req.params.id, entity: 'structure', action: 'update', summary: `Застосовано структуру папок: створено/знайдено ${created.length} тек`, author: req.body?.author ?? 'система' } }).catch(() => {});
+    res.json({ created: created.length, folders: created.slice(0, 100) });
+  } catch (err) { res.status(500).json({ error: String(err) }); }
+});
+
 // #310 (3d) Папка для інструкцій: поточна + кандидати з дерева (завершення етапу «Папка»).
 api.get('/companies/:id/instructions-folder', async (req, res) => {
   try {

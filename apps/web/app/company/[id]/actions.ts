@@ -172,6 +172,14 @@ export async function getStructureProposal(companyId: string): Promise<{ proposa
 export async function proposeStructure(companyId: string): Promise<StructureProposal> {
   return call(`/companies/${companyId}/propose-structure`, 'POST', {});
 }
+/** #311 (3e-2) Зберегти відредаговану пропозицію. */
+export async function saveStructureProposal(companyId: string, structure: ProposedNode[]): Promise<{ ok: boolean }> {
+  return call(`/companies/${companyId}/structure-proposal`, 'PATCH', { structure });
+}
+/** #311 (3e-3) Застосувати — створити теки на Диску (без переміщення файлів). */
+export async function applyStructure(companyId: string): Promise<{ created: number; folders: { name: string; path: string; id: string }[] }> {
+  return call(`/companies/${companyId}/apply-structure`, 'POST', {});
+}
 
 export interface InstructionsFolderInfo { current: string | null; suggestions: { id: string; name: string; path: string }[] }
 /** #310 (3d) Папка для інструкцій — поточна + кандидати. */
