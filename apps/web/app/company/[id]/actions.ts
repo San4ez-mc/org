@@ -162,6 +162,18 @@ export async function getDriveIndexStatus(companyId: string): Promise<DriveIndex
   return call(`/companies/${companyId}/index-drive/status`, 'GET');
 }
 
+export interface DetectedFacts {
+  departments: string[];
+  positions: { title: string; department?: string; holder?: string }[];
+  instructions: { title: string; source?: string }[];
+  companyFacts: { sphere?: string; mission?: string };
+  sourcesScanned?: number;
+}
+/** #309 (3c) Авто-визначення відділів/посад/інструкцій із документів. */
+export async function detectFacts(companyId: string): Promise<DetectedFacts> {
+  return call(`/companies/${companyId}/detect-facts`, 'POST', {});
+}
+
 export interface RagSource { source: string; folderId?: string; score?: number; driveFileId?: string | null; path?: string | null }
 /** #308 Пошук по базі знань компанії (RAG через флоус + Vertex). */
 export async function ragSearch(companyId: string, query: string): Promise<{ answer: string; sources: RagSource[] }> {
