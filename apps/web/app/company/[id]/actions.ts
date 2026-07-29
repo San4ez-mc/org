@@ -162,6 +162,16 @@ export async function getDriveIndexStatus(companyId: string): Promise<DriveIndex
   return call(`/companies/${companyId}/index-drive/status`, 'GET');
 }
 
+export interface InstructionsFolderInfo { current: string | null; suggestions: { id: string; name: string; path: string }[] }
+/** #310 (3d) Папка для інструкцій — поточна + кандидати. */
+export async function getInstructionsFolder(companyId: string): Promise<InstructionsFolderInfo> {
+  return call(`/companies/${companyId}/instructions-folder`, 'GET');
+}
+/** #310 (3d) Встановити папку для інструкцій (обрати або створити). */
+export async function setInstructionsFolder(companyId: string, opts: { folderId?: string; create?: boolean; name?: string }): Promise<{ folderId: string }> {
+  return call(`/companies/${companyId}/instructions-folder`, 'POST', opts);
+}
+
 export interface DetectedFacts {
   departments: string[];
   positions: { title: string; department?: string; holder?: string }[];

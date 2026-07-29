@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { randomBytes } from 'crypto';
 import { prisma } from '@platform/db';
-import { findFolderByName, listFolderTree, listFolderFiles, readFileText, type DriveNode } from '@platform/drive';
+import { findFolderByName, listFolderTree, listFolderFiles, readFileText, ensureFolder, type DriveNode } from '@platform/drive';
 import { stepsToMermaid } from '@platform/ai';
 import { requireApiSecret } from '../middleware/auth';
 import { handleAct } from '../services/agent';
@@ -1884,6 +1884,41 @@ api.post('/companies/:id/search', async (req, res) => {
     });
     const j: any = await r.json().catch(() => ({}));
     res.json({ answer: j.answer ?? 'Помилка пошуку.', sources: Array.isArray(j.sources) ? j.sources : [] });
+  } catch (err) { res.status(500).json({ error: String(err) }); }
+});
+
+// #310 (3d) Папка для інструкцій: поточна + кандидати з дерева (завершення етапу «Папка»).
+api.get('/companies/:id/instructions-folder', async (req, res) => {
+  try {
+    const c = await prisma.company.findUnique({ where: { id: req.params.id }, select: { driveRootFolderId: true, driveInstructionsFolderId: true } });
+    if (!c?.driveRootFolderId) return void res.json({ current: null, suggestions: [] });
+    const tree = await listFolderTree(c.driveRootFolderId);
+    const re = /посадов\w*\s*інструкц|робоч\w*\s*регламент|^\s*регламенти|інструкц/i;
+    const suggestions: { id: string; name: string; path: string }[] = [];
+    const walk = (nodes: DriveNode[], path: string) => {
+      for (const n of nodes) if (n.isFolder) {
+        const p = `${path}/${n.name}`;
+        if (re.test(n.name)) suggestions.push({ id: n.id, name: n.name, path: p });
+        if (n.children) walk(n.children, p);
+      }
+    };
+    walk(tree, '');
+    res.json({ current: c.driveInstructionsFolderId ?? null, suggestions: suggestions.slice(0, 12) });
+  } catch (err) { res.status(500).json({ error: String(err) }); }
+});
+
+// #310 (3d) Встановити папку для інструкцій (обрати наявну або створити нову під коренем).
+api.post('/companies/:id/instructions-folder', async (req, res) => {
+  try {
+    const c = await prisma.company.findUnique({ where: { id: req.params.id }, select: { driveRootFolderId: true } });
+    if (!c?.driveRootFolderId) return void res.status(400).json({ error: 'no-drive-folder' });
+    let folderId = String(req.body?.folderId || '');
+    if (!folderId && req.body?.create) {
+      folderId = await ensureFolder(c.driveRootFolderId, String(req.body?.name || 'Посадові інструкції').slice(0, 100));
+    }
+    if (!folderId) return void res.status(400).json({ error: 'folderId або create обовʼязкове' });
+    await prisma.company.update({ where: { id: req.params.id }, data: { driveInstructionsFolderId: folderId } });
+    res.json({ folderId });
   } catch (err) { res.status(500).json({ error: String(err) }); }
 });
 

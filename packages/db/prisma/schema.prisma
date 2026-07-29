@@ -68,6 +68,7 @@ model Company {
   driveIndexedCount Int       @default(0) // #303 к-ть проіндексованих файлів
   vectorProjectId   String? // #306 власний проєкт компанії у vector-базі
   vectorToken       String? // #306 root-токен цього проєкту (для індексації/пошуку/під-токенів)
+  driveInstructionsFolderId String? // #310 (3d) тека на Drive, куди система пише посадові інструкції
   orgSheetId        String? // Google Sheet з оргсхемою
   googleAccountId   String? // прив'язаний OAuth Google-акаунт (для Drive/Sheets/Docs)
 
