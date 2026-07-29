@@ -1912,9 +1912,13 @@ api.post('/companies/:id/propose-structure', async (req, res) => {
 
     const prompt = `Ти — консультант з орг-структури. За канонічним шаблоном і НАЯВНИМИ теками компанії "${c.name}"${c.abbr ? ` (префікс ${c.abbr})` : ''} запропонуй впорядковану структуру папок Google Drive. Для КОЖНОЇ теки додай:\n- descUser: короткий опис для людини (що тут зберігати),\n- descSystem: машинний опис для авто-маршрутизації майбутніх файлів (ключові слова/типи документів).\nДе можливо — зістав наявні теки з шаблоном. Поверни РІВНО один JSON без тексту навколо:\n{"structure":[{"name":"...","type":"folder","descUser":"...","descSystem":"...","children":[...]}]}\nУкраїнською.\n\nШАБЛОН:\n${STRUCTURE_TEMPLATE}\n\nНАЯВНІ ТЕКИ:\n${current}`;
 
-    const text = await flowsGenerate(prompt, 8192);
+    const text = await flowsGenerate(prompt, 16384);
     let parsed: any = null;
-    if (text) { const m = text.match(/\{[\s\S]*\}/); if (m) { try { parsed = JSON.parse(m[0]); } catch { /* ignore */ } } }
+    if (text) {
+      const cleaned = text.replace(/```(?:json)?/gi, '').trim();
+      const m = cleaned.match(/\{[\s\S]*\}/);
+      if (m) { try { parsed = JSON.parse(m[0]); } catch { /* ignore */ } }
+    }
     if (!parsed || !Array.isArray(parsed.structure)) return void res.status(502).json({ error: 'llm-parse-failed', raw: (text || '').slice(0, 300) });
 
     const proposal = { structure: parsed.structure, generatedAt: new Date().toISOString() };
