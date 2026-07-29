@@ -38,16 +38,22 @@ function CurrentTree({ nodes, level = 0 }: { nodes: DriveNode[]; level?: number 
 }
 
 // ── Пропозиція (праворуч, редагована) ──
-function EditableTree({ nodes, path, onRename, onDelete, onAdd }: {
+const descInput: React.CSSProperties = {
+  width: '100%', fontSize: 11.5, background: 'hsl(var(--background))', border: '1px solid hsl(var(--border))',
+  borderRadius: 5, padding: '2px 6px', color: 'inherit', boxSizing: 'border-box',
+};
+
+function EditableTree({ nodes, path, onRename, onDelete, onAdd, onDesc }: {
   nodes: ProposedNode[]; path: number[];
   onRename: (p: number[], v: string) => void; onDelete: (p: number[]) => void; onAdd: (p: number[]) => void;
+  onDesc: (p: number[], field: 'descUser' | 'descSystem', v: string) => void;
 }) {
   return (
     <div style={{ marginLeft: path.length ? 12 : 0 }}>
       {nodes.map((n, i) => {
         const p = [...path, i];
         return (
-          <div key={i} style={{ marginBottom: 3 }}>
+          <div key={i} style={{ marginBottom: 6 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
               <span style={{ fontSize: 12.5 }}>{n.type === 'Таблиця' ? '📊' : n.type === 'Документ' ? '📄' : '📁'}</span>
               <input value={n.name} onChange={(e) => onRename(p, e.target.value)}
@@ -57,9 +63,12 @@ function EditableTree({ nodes, path, onRename, onDelete, onAdd }: {
               <button style={iconBtn} title="Додати підтеку" onClick={() => onAdd(p)}>＋</button>
               <button style={{ ...iconBtn, color: 'hsl(0 60% 60%)' }} title="Видалити" onClick={() => onDelete(p)}>✕</button>
             </div>
-            {n.descUser && <div style={{ ...muted, marginLeft: 20, lineHeight: 1.35 }}>{n.descUser}</div>}
+            <div style={{ marginLeft: 20, display: 'flex', flexDirection: 'column', gap: 2, marginTop: 2 }}>
+              <input value={n.descUser || ''} onChange={(e) => onDesc(p, 'descUser', e.target.value)} placeholder="опис для людини — що тут зберігати" style={descInput} />
+              <input value={n.descSystem || ''} onChange={(e) => onDesc(p, 'descSystem', e.target.value)} placeholder="⚙ системний опис — ключові слова для авто-розкладки файлів" style={{ ...descInput, color: 'hsl(210 45% 62%)' }} />
+            </div>
             {n.children && n.children.length > 0 && (
-              <EditableTree nodes={n.children} path={p} onRename={onRename} onDelete={onDelete} onAdd={onAdd} />
+              <EditableTree nodes={n.children} path={p} onRename={onRename} onDelete={onDelete} onAdd={onAdd} onDesc={onDesc} />
             )}
           </div>
         );
@@ -101,6 +110,7 @@ export default function StructureProposalPanel({ companyId }: { companyId: strin
   const onRename = (p: number[], v: string) => mutate((s) => { childrenAt(s, p.slice(0, -1))[p[p.length - 1]].name = v; });
   const onDelete = (p: number[]) => mutate((s) => { childrenAt(s, p.slice(0, -1)).splice(p[p.length - 1], 1); });
   const onAdd = (p: number[]) => mutate((s) => { childrenAt(s, p).push({ name: 'Нова тека', type: 'folder', descUser: '', descSystem: '' }); });
+  const onDesc = (p: number[], field: 'descUser' | 'descSystem', v: string) => mutate((s) => { (childrenAt(s, p.slice(0, -1))[p[p.length - 1]] as any)[field] = v; });
 
   async function save() {
     if (!structure) return;
@@ -127,8 +137,8 @@ export default function StructureProposalPanel({ companyId }: { companyId: strin
         <button style={btn} onClick={generate} disabled={loading}>{loading ? 'Генерую…' : (structure ? '🔄 Перегенерувати' : '🏗️ Згенерувати')}</button>
       </div>
       <p style={{ ...muted, margin: '0 0 12px', lineHeight: 1.5 }}>
-        ШІ пропонує структуру за шаблоном (7 відділень) з описами. Праворуч можна <b>перейменувати/додати/видалити</b> теки.
-        «Застосувати» <b>створює теки</b> на Диску (файли поки не переміщує).
+        ШІ пропонує структуру (мінімальна реструктуризація, на основі наявних тек). Праворуч редагуй: назви, <b>опис для людини</b> і <b>системний опис</b> (за ним ШІ потім розкладатиме файли — заповнюй уважно!).
+        «Застосувати» поки лише <b>створює теки</b>; переміщення файлів — наступний крок (з попереднім списком «що куди»).
       </p>
       {err && <p style={{ color: 'hsl(0 70% 62%)', fontSize: 12.5 }}>{err}</p>}
 
@@ -141,7 +151,7 @@ export default function StructureProposalPanel({ companyId }: { companyId: strin
             </div>
             <div style={{ ...col, borderColor: 'hsl(142 40% 30% / 0.5)' }}>
               <div style={{ fontSize: 12, fontWeight: 600, color: 'hsl(142 45% 65%)', marginBottom: 8 }}>ПРОПОЗИЦІЯ (редагована)</div>
-              <EditableTree nodes={structure} path={[]} onRename={onRename} onDelete={onDelete} onAdd={onAdd} />
+              <EditableTree nodes={structure} path={[]} onRename={onRename} onDelete={onDelete} onAdd={onAdd} onDesc={onDesc} />
             </div>
           </div>
           <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap', alignItems: 'center' }}>
