@@ -162,6 +162,17 @@ export async function getDriveIndexStatus(companyId: string): Promise<DriveIndex
   return call(`/companies/${companyId}/index-drive/status`, 'GET');
 }
 
+export interface ProposedNode { name: string; type?: string; descUser?: string; descSystem?: string; children?: ProposedNode[] }
+export interface StructureProposal { structure: ProposedNode[]; generatedAt?: string }
+/** #311 (3e-1) Отримати збережену пропозицію структури. */
+export async function getStructureProposal(companyId: string): Promise<{ proposal: StructureProposal | null }> {
+  return call(`/companies/${companyId}/structure-proposal`, 'GET');
+}
+/** #311 (3e-1) Згенерувати нову пропозицію структури папок (ШІ). */
+export async function proposeStructure(companyId: string): Promise<StructureProposal> {
+  return call(`/companies/${companyId}/propose-structure`, 'POST', {});
+}
+
 export interface InstructionsFolderInfo { current: string | null; suggestions: { id: string; name: string; path: string }[] }
 /** #310 (3d) Папка для інструкцій — поточна + кандидати. */
 export async function getInstructionsFolder(companyId: string): Promise<InstructionsFolderInfo> {

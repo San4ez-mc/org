@@ -1887,6 +1887,50 @@ api.post('/companies/:id/search', async (req, res) => {
   } catch (err) { res.status(500).json({ error: String(err) }); }
 });
 
+// #311 (3e-1) Шаблон структури (стислий) — для генерації пропозиції.
+const STRUCTURE_TEMPLATE = `Канонічний шаблон (7 відділень, з префіксом-скороченням компанії):
+1. Відділення побудови (структура, команда, процеси): Відділ комунікацій; Відділ направлення та персоналу (Найм і вакансії; Регламенти та посадові інструкції → Архів / Регламенти в розробці / Робочі регламенти; Оргструктура → Бізнес процеси, Орг.схема, Матриця функцій).
+2. Відділення поширення (маркетинг + продажі): Маркетинг (Дизайн, Маркетингові кампанії, СММ, Стратегічний маркетинг); Відділ продаж.
+3. Фінансове відділення: Бухгалтерія; Управлінська звітність.
+4. Технічне відділення: посадові папки за напрямами.
+5. Відділення кваліфікації: Відділ якості; Навчання персоналу.
+6. Відділення роботи з публікою: Зв'язок з суспільством; Робота з партнерами.
+7. Адміністративне відділення: Власник, Директор, Помічник.
+Кожна ПОСАДА = окрема тека: <Посада>/{Посадові інструкції, Доступні документи, Доступи(Таблиця), Звітність(Таблиця)}.
+Наскрізні: «Опис документів та доступи»(Таблиця); «Спільні документи»(Бренд/айдентика, Політики компанії, Стратегія-історія); «Список працівників»(Таблиця).`;
+
+// #311 (3e-1) Згенерувати пропозицію нової структури папок (ШІ за шаблоном + наявні теки).
+api.post('/companies/:id/propose-structure', async (req, res) => {
+  try {
+    const c = await prisma.company.findUnique({ where: { id: req.params.id }, select: { driveRootFolderId: true, name: true, abbr: true } });
+    if (!c?.driveRootFolderId) return void res.status(400).json({ error: 'no-drive-folder' });
+    const tree = await listFolderTree(c.driveRootFolderId);
+    const lines: string[] = [];
+    const walk = (nodes: DriveNode[], depth: number) => { for (const n of nodes) if (n.isFolder) { lines.push('  '.repeat(depth) + '- ' + n.name); if (n.children && depth < 4) walk(n.children, depth + 1); } };
+    walk(tree, 0);
+    const current = lines.slice(0, 200).join('\n') || '(тек нема)';
+
+    const prompt = `Ти — консультант з орг-структури. За канонічним шаблоном і НАЯВНИМИ теками компанії "${c.name}"${c.abbr ? ` (префікс ${c.abbr})` : ''} запропонуй впорядковану структуру папок Google Drive. Для КОЖНОЇ теки додай:\n- descUser: короткий опис для людини (що тут зберігати),\n- descSystem: машинний опис для авто-маршрутизації майбутніх файлів (ключові слова/типи документів).\nДе можливо — зістав наявні теки з шаблоном. Поверни РІВНО один JSON без тексту навколо:\n{"structure":[{"name":"...","type":"folder","descUser":"...","descSystem":"...","children":[...]}]}\nУкраїнською.\n\nШАБЛОН:\n${STRUCTURE_TEMPLATE}\n\nНАЯВНІ ТЕКИ:\n${current}`;
+
+    const text = await flowsGenerate(prompt, 8192);
+    let parsed: any = null;
+    if (text) { const m = text.match(/\{[\s\S]*\}/); if (m) { try { parsed = JSON.parse(m[0]); } catch { /* ignore */ } } }
+    if (!parsed || !Array.isArray(parsed.structure)) return void res.status(502).json({ error: 'llm-parse-failed', raw: (text || '').slice(0, 300) });
+
+    const proposal = { structure: parsed.structure, generatedAt: new Date().toISOString() };
+    await prisma.company.update({ where: { id: req.params.id }, data: { structureProposal: proposal } });
+    res.json(proposal);
+  } catch (err) { res.status(500).json({ error: String(err) }); }
+});
+
+// #311 (3e-1) Отримати збережену пропозицію структури.
+api.get('/companies/:id/structure-proposal', async (req, res) => {
+  try {
+    const c = await prisma.company.findUnique({ where: { id: req.params.id }, select: { structureProposal: true } });
+    res.json({ proposal: c?.structureProposal ?? null });
+  } catch (err) { res.status(500).json({ error: String(err) }); }
+});
+
 // #310 (3d) Папка для інструкцій: поточна + кандидати з дерева (завершення етапу «Папка»).
 api.get('/companies/:id/instructions-folder', async (req, res) => {
   try {

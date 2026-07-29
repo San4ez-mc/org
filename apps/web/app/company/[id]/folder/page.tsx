@@ -5,6 +5,7 @@ import DriveTreeManager from '@/components/DriveTreeManager';
 import DriveIndexPanel from '@/components/DriveIndexPanel';
 import DriveDetectPanel from '@/components/DriveDetectPanel';
 import InstructionsFolderPanel from '@/components/InstructionsFolderPanel';
+import StructureProposalPanel from '@/components/StructureProposalPanel';
 import DriveSearchPanel from '@/components/DriveSearchPanel';
 import VectorTokensPanel from '@/components/VectorTokensPanel';
 
@@ -39,6 +40,8 @@ export default async function CompanyFolder({ params }: { params: { id: string }
       {company.driveRootFolderId && company.driveIndexedAt && <DriveDetectPanel companyId={company.id} />}
       {/* #310 (3d): папка для інструкцій — завершення етапу «Папка». */}
       {company.driveRootFolderId && <InstructionsFolderPanel companyId={company.id} />}
+      {/* #311 (3e-1): ШІ-пропозиція нової структури папок (2 панелі). */}
+      {company.driveRootFolderId && company.driveIndexedAt && <StructureProposalPanel companyId={company.id} />}
       {/* #308 Фаза 4: пошук по базі знань (RAG через флоус + Vertex). */}
       {company.driveRootFolderId && company.driveIndexedAt && <DriveSearchPanel companyId={company.id} />}
       {/* #307 Крок 3 (Фаза 3): токени доступу до бази знань — folder-scoped. */}
