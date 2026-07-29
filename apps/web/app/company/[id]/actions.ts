@@ -162,6 +162,12 @@ export async function getDriveIndexStatus(companyId: string): Promise<DriveIndex
   return call(`/companies/${companyId}/index-drive/status`, 'GET');
 }
 
+export interface RagSource { source: string; folderId?: string; score?: number; driveFileId?: string | null; path?: string | null }
+/** #308 Пошук по базі знань компанії (RAG через флоус + Vertex). */
+export async function ragSearch(companyId: string, query: string): Promise<{ answer: string; sources: RagSource[] }> {
+  return call(`/companies/${companyId}/search`, 'POST', { query });
+}
+
 export interface VectorTokenRow { token: string; label: string; folderScope: string[] | null; isRoot: boolean; createdAt?: string }
 
 /** #307 Список токенів компанії у vector-базі. */

@@ -1868,6 +1868,25 @@ api.delete('/companies/:id/vector/tokens/:token', async (req, res) => {
   } catch (err) { res.status(500).json({ error: String(err) }); }
 });
 
+// #308 (Фаза 4) Пошук по базі знань компанії через флоус (RAG + Vertex Gemini + джерела).
+const FLOWS_RAG_URL = process.env.FLOWS_RAG_URL || 'http://127.0.0.1:3000/api/rag/search';
+const RAG_SECRET = process.env.RAG_SECRET || '';
+api.post('/companies/:id/search', async (req, res) => {
+  try {
+    const query = String(req.body?.query || '').trim();
+    if (!query) return void res.status(400).json({ error: 'query обовʼязкове' });
+    const c = await prisma.company.findUnique({ where: { id: req.params.id }, select: { vectorToken: true } });
+    if (!c?.vectorToken) return void res.status(400).json({ error: 'компанію ще не проіндексовано' });
+    const r = await fetch(FLOWS_RAG_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Rag-Secret': RAG_SECRET },
+      body: JSON.stringify({ query, vectorToken: c.vectorToken }),
+    });
+    const j: any = await r.json().catch(() => ({}));
+    res.json({ answer: j.answer ?? 'Помилка пошуку.', sources: Array.isArray(j.sources) ? j.sources : [] });
+  } catch (err) { res.status(500).json({ error: String(err) }); }
+});
+
 // #200/#276 Аналіз підключеної Drive-папки компанії: зіставити теки з орг-одиницями
 // (наповнити DriveFolder), зібрати документи посадових інструкцій і (опційно) проіндексувати
 // всі файли у вектор-базу для семантичного пошуку. Ідемпотентно (upsert).
