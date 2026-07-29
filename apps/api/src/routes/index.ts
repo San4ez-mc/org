@@ -5,7 +5,7 @@ import { findFolderByName, listFolderTree, listFolderFiles, readFileText, type D
 import { stepsToMermaid } from '@platform/ai';
 import { requireApiSecret } from '../middleware/auth';
 import { handleAct } from '../services/agent';
-import { indexInstruction, findRelatedInstructions, indexDriveDocuments, vectorEnabled, createSubToken, listVectorTokens, deleteVectorToken } from '../services/vector';
+import { indexInstruction, findRelatedInstructions, indexDriveDocuments, vectorEnabled, createSubToken, listVectorTokens, deleteVectorToken, vectorSearch, flowsGenerate } from '../services/vector';
 import { startDriveIndex, getIndexProgress } from '../services/driveIndexer';
 
 /**
@@ -1884,6 +1884,45 @@ api.post('/companies/:id/search', async (req, res) => {
     });
     const j: any = await r.json().catch(() => ({}));
     res.json({ answer: j.answer ?? 'Помилка пошуку.', sources: Array.isArray(j.sources) ? j.sources : [] });
+  } catch (err) { res.status(500).json({ error: String(err) }); }
+});
+
+// #309 (3c) Авто-визначення відділів/посад/інструкцій/фактів із документів (Document Reader → Шар 3).
+// Кілька семантичних запитів у вектор → зібрані фрагменти → Vertex-витяг структурованого JSON (пропозиції).
+api.post('/companies/:id/detect-facts', async (req, res) => {
+  try {
+    const c = await prisma.company.findUnique({ where: { id: req.params.id }, select: { vectorToken: true, name: true } });
+    if (!c?.vectorToken) return void res.status(400).json({ error: 'компанію ще не проіндексовано' });
+
+    const queries = ['посада керівник відділ', 'посадова інструкція обовʼязки', 'бізнес процес', 'цінний кінцевий продукт ЦКП мета', 'команда працівники хто відповідає'];
+    const seen = new Set<string>();
+    const chunks: { source: string; content: string }[] = [];
+    for (const q of queries) {
+      const r = await vectorSearch(c.vectorToken, q, 5);
+      for (const it of (r?.results ?? [])) {
+        const key = `${it.source}|${it.chunkNo ?? 0}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        chunks.push({ source: it.source, content: String(it.content || '').slice(0, 900) });
+      }
+    }
+    if (!chunks.length) return void res.json({ departments: [], positions: [], instructions: [], companyFacts: {}, note: 'no-data' });
+
+    const context = chunks.slice(0, 25).map((x, i) => `[${i + 1}] ${x.source}\n${x.content}`).join('\n\n');
+    const prompt = `На основі фрагментів документів компанії "${c.name}" витягни структуровані факти. Поверни РІВНО один JSON без тексту навколо:\n{"departments":["назва відділу/відділення"],"positions":[{"title":"посада","department":"відділ або порожньо","holder":"імʼя якщо є або порожньо"}],"instructions":[{"title":"назва інструкції/регламенту","source":"файл"}],"companyFacts":{"sphere":"сфера діяльності","mission":"мета якщо явно є"}}\nЛише те, що ЯВНО присутнє у джерелах. Якщо чогось нема — порожній масив/рядок. Українською.\n\nДЖЕРЕЛА:\n${context}`;
+
+    const text = await flowsGenerate(prompt, 2048);
+    let parsed: any = null;
+    if (text) { const m = text.match(/\{[\s\S]*\}/); if (m) { try { parsed = JSON.parse(m[0]); } catch { /* ignore */ } } }
+    if (!parsed) return void res.status(502).json({ error: 'llm-parse-failed', raw: (text || '').slice(0, 300) });
+
+    res.json({
+      departments: Array.isArray(parsed.departments) ? parsed.departments : [],
+      positions: Array.isArray(parsed.positions) ? parsed.positions : [],
+      instructions: Array.isArray(parsed.instructions) ? parsed.instructions : [],
+      companyFacts: parsed.companyFacts && typeof parsed.companyFacts === 'object' ? parsed.companyFacts : {},
+      sourcesScanned: chunks.length,
+    });
   } catch (err) { res.status(500).json({ error: String(err) }); }
 });
 

@@ -43,6 +43,22 @@ export async function vectorSearch(token: string, query: string, limit = 6): Pro
   return call('/search', { query, limit }, token);
 }
 
+/** #309 Generic-генерація через флоус (Vertex Gemini) — для структурного витягу фактів (3c/3e). */
+const FLOWS_GEN_URL = (process.env.FLOWS_RAG_URL || 'http://127.0.0.1:3000/api/rag/search').replace(/\/search$/, '/generate');
+const RAG_SECRET_V = process.env.RAG_SECRET || '';
+export async function flowsGenerate(prompt: string, maxTokens = 2048): Promise<string | null> {
+  try {
+    const res = await fetch(FLOWS_GEN_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Rag-Secret': RAG_SECRET_V },
+      body: JSON.stringify({ prompt, maxTokens }),
+    });
+    if (!res.ok) return null;
+    const j: any = await res.json();
+    return typeof j?.text === 'string' ? j.text : null;
+  } catch { return null; }
+}
+
 /** #307 Список токенів проєкту компанії. */
 export async function listVectorTokens(projectId: string): Promise<any[] | null> {
   try {
