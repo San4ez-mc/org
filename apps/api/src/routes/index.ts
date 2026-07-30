@@ -2010,6 +2010,21 @@ api.post('/companies/:id/instructions-folder', async (req, res) => {
   } catch (err) { res.status(500).json({ error: String(err) }); }
 });
 
+// #310 (3d) Створити ЦЕНТРАЛЬНУ папку інструкцій: «1. Відділення побудови» → «Посадові інструкції»
+// → 7 департаментів. Сюди пишуться всі інструкції, звідси — ярлики в посадові папки працівників.
+const DIVISIONS_7 = ['1. Відділення побудови', '2. Відділення поширення', '3. Фінансове відділення', '4. Технічне відділення', '5. Відділення кваліфікації', '6. Відділення роботи з публікою', '7. Адміністративне відділення'];
+api.post('/companies/:id/instructions-folder/central', async (req, res) => {
+  try {
+    const c = await prisma.company.findUnique({ where: { id: req.params.id }, select: { driveRootFolderId: true } });
+    if (!c?.driveRootFolderId) return void res.status(400).json({ error: 'no-drive-folder' });
+    const pobudova = await ensureFolder(c.driveRootFolderId, '1. Відділення побудови');
+    const instr = await ensureFolder(pobudova, 'Посадові інструкції');
+    for (const div of DIVISIONS_7) await ensureFolder(instr, div);
+    await prisma.company.update({ where: { id: req.params.id }, data: { driveInstructionsFolderId: instr } });
+    res.json({ folderId: instr, departments: DIVISIONS_7.length });
+  } catch (err) { res.status(500).json({ error: String(err) }); }
+});
+
 // #309 (3c) Авто-визначення відділів/посад/інструкцій/фактів із документів (Document Reader → Шар 3).
 // Кілька семантичних запитів у вектор → зібрані фрагменти → Vertex-витяг структурованого JSON (пропозиції).
 api.post('/companies/:id/detect-facts', async (req, res) => {

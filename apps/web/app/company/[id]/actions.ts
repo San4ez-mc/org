@@ -190,6 +190,10 @@ export async function getInstructionsFolder(companyId: string): Promise<Instruct
 export async function setInstructionsFolder(companyId: string, opts: { folderId?: string; create?: boolean; name?: string }): Promise<{ folderId: string }> {
   return call(`/companies/${companyId}/instructions-folder`, 'POST', opts);
 }
+/** #310 (3d) Створити центральну папку інструкцій (Відділення побудови → 7 департаментів). */
+export async function setInstructionsFolderCentral(companyId: string): Promise<{ folderId: string; departments: number }> {
+  return call(`/companies/${companyId}/instructions-folder/central`, 'POST', {});
+}
 
 export interface DetectedFacts {
   departments: string[];

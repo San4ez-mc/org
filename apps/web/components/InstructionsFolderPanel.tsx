@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useState, useCallback } from 'react';
-import { getInstructionsFolder, setInstructionsFolder, type InstructionsFolderInfo } from '@/app/company/[id]/actions';
+import { getInstructionsFolder, setInstructionsFolder, setInstructionsFolderCentral, type InstructionsFolderInfo } from '@/app/company/[id]/actions';
 
 const card: React.CSSProperties = {
   background: 'hsl(var(--card))', border: '1px solid hsl(var(--border))',
@@ -29,15 +29,29 @@ export default function InstructionsFolderPanel({ companyId }: { companyId: stri
     finally { setBusy(false); }
   }
 
+  async function createCentral() {
+    setBusy(true); setErr('');
+    try { await setInstructionsFolderCentral(companyId); await load(); }
+    catch (e) { setErr('Не вдалось: ' + (e as Error).message); }
+    finally { setBusy(false); }
+  }
+
   const current = info?.current;
   const curName = info?.suggestions.find((s) => s.id === current)?.name;
 
   return (
     <div style={card}>
       <div style={{ fontWeight: 600, fontSize: 15, marginBottom: 4 }}>📝 Папка для посадових інструкцій</div>
-      <p style={{ ...muted, margin: '0 0 12px', lineHeight: 1.5 }}>
-        Признач теку, куди система <b>записуватиме</b> згенеровані посадові інструкції. Це завершує етап налаштування папки.
+      <p style={{ ...muted, margin: '0 0 10px', lineHeight: 1.5 }}>
+        Признач теку, куди система <b>записуватиме</b> посадові інструкції. Рекомендовано — <b>централізовано</b>:
+        всі інструкції зберігаються в одному місці («1. Відділення побудови → Посадові інструкції»), а в папки окремих
+        працівників потрапляють <b>ярликами</b> (не копіями). Це завершує етап налаштування папки.
       </p>
+
+      <div style={{ background: 'hsl(142 40% 12%)', border: '1px solid hsl(142 40% 26%)', borderRadius: 10, padding: 10, marginBottom: 12 }}>
+        <div style={{ fontSize: 12.5, marginBottom: 6 }}>⭐ <b>Рекомендовано:</b> центральна папка «Посадові інструкції» у Відділенні побудови з 7 департаментами всередині.</div>
+        <button style={btn} onClick={createCentral} disabled={busy}>{busy ? '…' : '🏗️ Створити центральну папку інструкцій (7 департаментів)'}</button>
+      </div>
 
       {current ? (
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
