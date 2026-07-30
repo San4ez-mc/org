@@ -162,7 +162,7 @@ export async function getDriveIndexStatus(companyId: string): Promise<DriveIndex
   return call(`/companies/${companyId}/index-drive/status`, 'GET');
 }
 
-export interface ProposedNode { name: string; type?: string; descUser?: string; descSystem?: string; children?: ProposedNode[] }
+export interface ProposedNode { name: string; type?: string; descUser?: string; descSystem?: string; action?: 'keep' | 'rename' | 'move' | 'new'; origin?: string; children?: ProposedNode[] }
 export interface StructureProposal { structure: ProposedNode[]; generatedAt?: string }
 /** #311 (3e-1) Отримати збережену пропозицію структури. */
 export async function getStructureProposal(companyId: string): Promise<{ proposal: StructureProposal | null }> {
