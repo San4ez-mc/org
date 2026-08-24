@@ -3,6 +3,7 @@ import express from 'express';
 import { prisma } from '@platform/db';
 import { api } from './routes';
 import { ssoCatalog } from './routes/ssoCatalog';
+import { mcpServer } from './routes/mcpServer';
 
 const app = express();
 app.use(express.json({ limit: '10mb' }));
@@ -20,6 +21,9 @@ app.get('/health', async (_req, res) => {
 // Каталог для панелі доступів SSO: власна авторизація спільним секретом,
 // тому монтується ДО роутера з requireApiSecret.
 app.use('/api/auth/sso', ssoCatalog);
+
+// MCP-каталог інструментів для ботів. Власна авторизація спільним секретом.
+app.use('/api/mcp', mcpServer);
 
 app.use('/api', api);
 

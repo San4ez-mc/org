@@ -71,6 +71,7 @@ model Company {
   driveInstructionsFolderId String? // #310 (3d) тека на Drive, куди система пише посадові інструкції
   structureProposal Json?   // #311 (3e) чернетка запропонованої ШІ структури папок (tree + описи + moves)
   orgSheetId        String? // Google Sheet з оргсхемою
+  crmSheetId        String? // CRM-таблиця асистента (Digital Hiring); id тримаємо тут, щоб модель його не бачила
   googleAccountId   String? // прив'язаний OAuth Google-акаунт (для Drive/Sheets/Docs)
 
   // #213 Стратегічний шар
