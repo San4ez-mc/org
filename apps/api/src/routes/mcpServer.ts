@@ -71,6 +71,82 @@ const TOOLS = [
     },
   },
   {
+    name: 'org_structure_read',
+    domain: 'org',
+    description: 'Орг-структура компанії: відділення, відділи, посади і хто їх обіймає. Без аргументів повертає все дерево.',
+    inputSchema: {
+      type: 'object',
+      properties: { query: { type: 'string', description: 'Необовязковий фільтр за назвою підрозділу чи посади' } },
+    },
+  },
+  {
+    name: 'org_unit_upsert',
+    domain: 'org',
+    description: 'Створити або перейменувати підрозділ чи посаду. Для видалення користуйся propose_change.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: 'Пропусти, щоб створити нову одиницю' },
+        name: { type: 'string' },
+        type: { type: 'string', enum: ['DIVISION', 'DEPARTMENT', 'SECTION', 'POST'] },
+        parentId: { type: 'string', description: 'Батьківська одиниця; для відділення пропусти' },
+        ckp: { type: 'string', description: 'Цінний кінцевий продукт' },
+      },
+      required: ['name'],
+    },
+  },
+  {
+    name: 'process_read',
+    domain: 'process',
+    description: 'Бізнес-процеси компанії з кроками. Без аргументів — список усіх; з id — один процес повністю.',
+    inputSchema: {
+      type: 'object',
+      properties: { id: { type: 'string' }, query: { type: 'string' } },
+    },
+  },
+  {
+    name: 'process_upsert',
+    domain: 'process',
+    description: 'Створити або оновити бізнес-процес. steps — впорядкований масив кроків. Для видалення користуйся propose_change.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: 'Пропусти, щоб створити новий' },
+        name: { type: 'string' },
+        description: { type: 'string' },
+        steps: { type: 'array', description: 'Кроки у форматі post / action / result', items: { type: 'object' } },
+      },
+      required: ['name'],
+    },
+  },
+  {
+    name: 'instruction_read',
+    domain: 'process',
+    description: 'Посадові інструкції компанії: назва, посада, статус, посилання на документ.',
+    inputSchema: {
+      type: 'object',
+      properties: { query: { type: 'string' } },
+    },
+  },
+  {
+    name: 'propose_change',
+    domain: 'org',
+    description: 'ЄДИНИЙ шлях для видалень і великих структурних змін. Нічого не змінює одразу — створює пропозицію, яку підтверджує людина в орг-платформі.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        action: {
+          type: 'string',
+          enum: ['delete_process', 'delete_org_unit', 'delete_instruction', 'archive_file', 'structure_change'],
+        },
+        targetId: { type: 'string', description: 'Що саме змінюємо' },
+        reason: { type: 'string', description: 'Навіщо — це побачить людина при підтвердженні' },
+        details: { type: 'object', description: 'Довільні деталі зміни' },
+      },
+      required: ['action', 'reason'],
+    },
+  },
+  {
     name: 'crm_search',
     domain: 'crm',
     description: 'Подивитись CRM-таблицю компанії. Порожній query повертає всі рядки й назви колонок. Кожен рядок має rowNumber для crm_update.',
@@ -163,6 +239,136 @@ async function callTool(name: string, args: any, ctx: Ctx): Promise<unknown> {
       const range = `'${sheet.sheetTitle.replace(/'/g, "''")}'!A1`;
       await appendSheetValues(sheetId, [values], range);
       return { ok: true, mode: 'append' };
+    }
+
+    case 'org_structure_read': {
+      const q = String(args?.query ?? '').trim().toLowerCase();
+      const units = await prisma.orgUnit.findMany({
+        where: { companyId: ctx.companyId },
+        select: {
+          id: true, name: true, type: true, parentId: true, ckp: true, isVacant: true,
+          memberPosts: {
+            where: { removedAt: null },
+            select: { member: { select: { firstName: true, lastName: true } } },
+          },
+        },
+        orderBy: [{ type: 'asc' }, { orderNo: 'asc' }],
+      });
+      const shaped = units
+        .map((u) => ({
+          id: u.id, name: u.name, type: u.type, parentId: u.parentId, ckp: u.ckp,
+          holders: u.memberPosts.map((mp) => [mp.member.firstName, mp.member.lastName].filter(Boolean).join(' ')),
+          isVacant: u.isVacant,
+        }))
+        .filter((u) => !q || u.name.toLowerCase().includes(q));
+      return { count: shaped.length, units: shaped };
+    }
+
+    case 'org_unit_upsert': {
+      const unitName = String(args?.name ?? '').trim();
+      if (!unitName) throw new Error('Поле name обовязкове');
+      if (args?.id) {
+        const updated = await prisma.orgUnit.update({
+          where: { id: String(args.id) },
+          data: { name: unitName, ...(args?.ckp !== undefined && { ckp: args.ckp || null }) },
+          select: { id: true, name: true, type: true },
+        });
+        return { ok: true, mode: 'update', unit: updated };
+      }
+      const created = await prisma.orgUnit.create({
+        data: {
+          companyId: ctx.companyId,
+          name: unitName,
+          type: (args?.type || 'POST') as any,
+          parentId: args?.parentId ? String(args.parentId) : null,
+          ckp: args?.ckp ? String(args.ckp) : null,
+        },
+        select: { id: true, name: true, type: true },
+      });
+      return { ok: true, mode: 'create', unit: created };
+    }
+
+    case 'process_read': {
+      if (args?.id) {
+        const one = await prisma.process.findFirst({
+          where: { id: String(args.id), companyId: ctx.companyId },
+          select: { id: true, name: true, description: true, steps: true, ownerUnitId: true },
+        });
+        if (!one) throw new Error('Процес не знайдено');
+        return one;
+      }
+      const q = String(args?.query ?? '').trim().toLowerCase();
+      const list = await prisma.process.findMany({
+        where: { companyId: ctx.companyId },
+        select: { id: true, name: true, description: true },
+        orderBy: { name: 'asc' },
+      });
+      const filtered = q ? list.filter((x) => x.name.toLowerCase().includes(q)) : list;
+      return { count: filtered.length, processes: filtered };
+    }
+
+    case 'process_upsert': {
+      const procName = String(args?.name ?? '').trim();
+      if (!procName) throw new Error('Поле name обовязкове');
+      const data: any = {
+        name: procName,
+        ...(args?.description !== undefined && { description: args.description || null }),
+        ...(args?.steps !== undefined && { steps: args.steps }),
+      };
+      if (args?.id) {
+        const updated = await prisma.process.update({
+          where: { id: String(args.id) }, data, select: { id: true, name: true },
+        });
+        return { ok: true, mode: 'update', process: updated };
+      }
+      const created = await prisma.process.create({
+        data: { ...data, companyId: ctx.companyId }, select: { id: true, name: true },
+      });
+      return { ok: true, mode: 'create', process: created };
+    }
+
+    case 'instruction_read': {
+      const q = String(args?.query ?? '').trim().toLowerCase();
+      const list = await prisma.instruction.findMany({
+        where: { companyId: ctx.companyId },
+        select: {
+          id: true, title: true, status: true, driveDocId: true,
+          postUnit: { select: { name: true } },
+        },
+        orderBy: { title: 'asc' },
+      });
+      const shaped = list
+        .map((i) => ({
+          id: i.id, title: i.title, status: i.status, post: i.postUnit?.name ?? null,
+          url: i.driveDocId ? 'https://docs.google.com/document/d/' + i.driveDocId + '/edit' : null,
+        }))
+        .filter((i) => !q || i.title.toLowerCase().includes(q));
+      return { count: shaped.length, instructions: shaped };
+    }
+
+    case 'propose_change': {
+      // Нічого не виконуємо. Модель може помилитись, а видалення процесу чи
+      // посади незворотне. Людина підтверджує в інтерфейсі орг-платформи.
+      const proposal = await prisma.proposal.create({
+        data: {
+          companyId: ctx.companyId,
+          type: 'STRUCTURE_CHANGE',
+          payload: {
+            action: String(args?.action ?? ''),
+            targetId: args?.targetId ?? null,
+            reason: String(args?.reason ?? ''),
+            details: args?.details ?? {},
+            source: 'assistant',
+          },
+          status: 'PENDING',
+        },
+        select: { id: true },
+      });
+      return {
+        ok: true,
+        proposalId: proposal.id,
+        note: 'Створено пропозицію. Зміну буде застосовано лише після підтвердження людиною в орг-платформі.',
+      };
     }
 
     default:
