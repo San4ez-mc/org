@@ -2,6 +2,7 @@ import 'dotenv/config';
 import express from 'express';
 import { prisma } from '@platform/db';
 import { api } from './routes';
+import { ssoCatalog } from './routes/ssoCatalog';
 
 const app = express();
 app.use(express.json({ limit: '10mb' }));
@@ -15,6 +16,10 @@ app.get('/health', async (_req, res) => {
     res.status(503).json({ status: 'degraded', db: 'down', error: String(err) });
   }
 });
+
+// Каталог для панелі доступів SSO: власна авторизація спільним секретом,
+// тому монтується ДО роутера з requireApiSecret.
+app.use('/api/auth/sso', ssoCatalog);
 
 app.use('/api', api);
 

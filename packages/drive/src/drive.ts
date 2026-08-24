@@ -348,3 +348,225 @@ export async function getFileMeta(id: string) {
   );
   return res.data;
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Інструменти асистента (Digital Hiring, ТЗ §0.1): пошук, читання, запис.
+// Тонкий шар поверх наявних хелперів — окремого Google-клієнта тут не заводимо.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Результат пошуку: як DriveFileInfo, але з посиланням і датою — це те, що бачить агент. */
+export interface DriveSearchHit extends DriveFileInfo {
+  webViewLink?: string;
+  modifiedTime?: string;
+}
+
+/** Скільки сторінок видачі максимум переглядаємо, коли фільтруємо по теці. */
+const SEARCH_MAX_PAGES = 5;
+
+/**
+ * Чи є файл нащадком теки (на будь-якій глибині).
+ * Drive не вміє рекурсивний `in parents`, а перелічувати теки наперед не можна —
+ * на реальному диску їх сотні, і будь-яка стеля мовчки ріже видачу.
+ * Тому йдемо навпаки: від файлу вгору по parents. `cache` живе в межах одного пошуку.
+ */
+async function isDescendantOf(
+  fileId: string,
+  ancestorId: string,
+  cache: Map<string, string | null>,
+): Promise<boolean> {
+  const drive = getDrive();
+  let current: string | null = fileId;
+
+  for (let hop = 0; hop < 12 && current; hop++) {
+    if (current === ancestorId) return true;
+
+    let parent = cache.get(current);
+    if (parent === undefined) {
+      try {
+        const res = await withRetry(() =>
+          drive.files.get({ fileId: current!, fields: 'parents', ...SHARED_DRIVE_PARAMS }),
+        );
+        parent = res.data.parents?.[0] ?? null;
+      } catch {
+        parent = null;
+      }
+      cache.set(current, parent);
+    }
+    current = parent;
+  }
+  return false;
+}
+
+/**
+ * Пошук файлів за назвою і вмістом. `folderId` обмежує видачу текою та її підтеками
+ * (фільтруємо по факту — див. isDescendantOf).
+ */
+export async function searchFiles(query: string, folderId?: string, limit = 20): Promise<DriveSearchHit[]> {
+  const term = escapeName(String(query ?? '').trim());
+  if (!term) return [];
+  const drive = getDrive();
+  const cap = Math.min(Math.max(limit, 1), 100);
+
+  const q =
+    `(name contains '${term}' or fullText contains '${term}')` +
+    ` and mimeType != '${FOLDER_MIME}' and trashed = false`;
+
+  const out: DriveSearchHit[] = [];
+  const cache = new Map<string, string | null>();
+  let pageToken: string | undefined;
+
+  for (let page = 0; page < SEARCH_MAX_PAGES; page++) {
+    const res: any = await withRetry(() =>
+      drive.files.list({
+        q,
+        fields: 'nextPageToken, files(id, name, mimeType, webViewLink, modifiedTime)',
+        orderBy: 'modifiedTime desc',
+        pageSize: folderId ? 100 : cap,
+        pageToken,
+        ...SHARED_DRIVE_PARAMS,
+      }),
+    );
+
+    for (const f of res.data.files ?? []) {
+      if (folderId && !(await isDescendantOf(f.id!, folderId, cache))) continue;
+      out.push({
+        id: f.id!,
+        name: f.name!,
+        mimeType: f.mimeType!,
+        webViewLink: f.webViewLink ?? undefined,
+        modifiedTime: f.modifiedTime ?? undefined,
+      });
+      if (out.length >= cap) return out;
+    }
+
+    pageToken = res.data.nextPageToken ?? undefined;
+    if (!pageToken || !folderId) break;
+  }
+
+  return out;
+}
+
+/** Прочитати файл за id (обгортка над getFileMeta + readFileText — агент має лише id). */
+export async function readFileById(
+  fileId: string,
+): Promise<{ id: string; name: string; mimeType: string; text: string | null }> {
+  const meta = await getFileMeta(fileId);
+  const info: DriveFileInfo = { id: meta.id!, name: meta.name!, mimeType: meta.mimeType! };
+  const text = await readFileText(info);
+  return { ...info, text };
+}
+
+export interface SheetRows {
+  sheetTitle: string;
+  header: string[];
+  /** Рядки без заголовка. `rowNumber` — реальний номер рядка в аркуші (1-based), придатний для updateSheetRow. */
+  rows: { rowNumber: number; values: string[] }[];
+}
+
+/**
+ * Прочитати таблицю у структуровані рядки (на відміну від приватного readSheetText, що віддає текст для вектора).
+ * `range` — A1 або назва аркуша; без нього беремо перший аркуш цілком.
+ */
+export async function readSheetRows(spreadsheetId: string, range?: string): Promise<SheetRows> {
+  const sheets = getSheets();
+  let target = range;
+  let sheetTitle = range ?? '';
+
+  if (!target) {
+    const meta = await withRetry(() => sheets.spreadsheets.get({ spreadsheetId }));
+    sheetTitle = meta.data.sheets?.[0]?.properties?.title ?? 'Sheet1';
+    target = `'${sheetTitle.replace(/'/g, "''")}'`;
+  }
+
+  const vr = await withRetry(() => sheets.spreadsheets.values.get({ spreadsheetId, range: target! }));
+  const raw = (vr.data.values ?? []) as unknown[][];
+  if (!raw.length) return { sheetTitle, header: [], rows: [] };
+
+  const header = (raw[0] ?? []).map((c) => String(c ?? '').trim());
+  const rows = raw
+    .slice(1)
+    .map((row, i) => ({ rowNumber: i + 2, values: (row ?? []).map((c) => String(c ?? '')) }))
+    .filter((r) => r.values.some((v) => v.trim()));
+
+  return { sheetTitle, header, rows };
+}
+
+/** Літера стовпця за 1-based індексом (1 → A, 27 → AA). */
+function columnLetter(index: number): string {
+  let n = index;
+  let s = '';
+  while (n > 0) {
+    const rem = (n - 1) % 26;
+    s = String.fromCharCode(65 + rem) + s;
+    n = Math.floor((n - 1) / 26);
+  }
+  return s;
+}
+
+/**
+ * Перезаписати ОДИН рядок таблиці. Свідомо вузька операція: агент не має можливості
+ * знести таблицю цілком (ТЗ §4.2 — тільки append/update конкретного рядка).
+ */
+export async function updateSheetRow(
+  spreadsheetId: string,
+  rowNumber: number,
+  values: (string | number)[],
+  sheetTitle?: string,
+): Promise<void> {
+  const row = Math.floor(Number(rowNumber));
+  if (!Number.isFinite(row) || row < 2) {
+    throw new Error(`updateSheetRow: rowNumber має бути >= 2 (рядок 1 — заголовки), отримано ${rowNumber}`);
+  }
+  if (!values.length) throw new Error('updateSheetRow: порожній values');
+
+  const prefix = sheetTitle ? `'${sheetTitle.replace(/'/g, "''")}'!` : '';
+  const range = `${prefix}A${row}:${columnLetter(values.length)}${row}`;
+  await writeSheetValues(spreadsheetId, [values], range);
+}
+
+/**
+ * Створити або оновити Google-документ у теці.
+ * Без `fileId` — ідемпотентно за назвою (ensureDoc). З `fileId` — вміст замінюється цілком.
+ */
+export async function writeFile(
+  folderId: string,
+  filename: string,
+  content: string,
+  fileId?: string,
+): Promise<{ fileId: string; created: boolean; webViewLink: string }> {
+  const docs = getDocs();
+
+  if (fileId) {
+    const doc = await withRetry(() => docs.documents.get({ documentId: fileId }));
+    const body = doc.data.body?.content ?? [];
+    const endIndex = body.length ? body[body.length - 1].endIndex ?? 1 : 1;
+
+    const requests: any[] = [];
+    // Тіло документа завжди закінчується службовим \n — його видалити не можна, тому endIndex - 1.
+    if (endIndex > 2) {
+      requests.push({ deleteContentRange: { range: { startIndex: 1, endIndex: endIndex - 1 } } });
+    }
+    if (content) requests.push({ insertText: { location: { index: 1 }, text: content } });
+    if (requests.length) {
+      await withRetry(() => docs.documents.batchUpdate({ documentId: fileId, requestBody: { requests } }));
+    }
+    return { fileId, created: false, webViewLink: `https://docs.google.com/document/d/${fileId}/edit` };
+  }
+
+  const existing = await findChild(folderId, filename, DOC_MIME);
+  const id = await ensureDoc(folderId, filename, existing ? undefined : content);
+
+  // ensureDoc знайшов наявний документ — вміст треба замінити явно.
+  if (existing) return writeFile(folderId, filename, content, existing);
+
+  return { fileId: id, created: true, webViewLink: `https://docs.google.com/document/d/${id}/edit` };
+}
+
+/** Чи лежить файл безпосередньо в теці. Використовується для перевірки whitelist перед записом. */
+export async function isFileInFolder(fileId: string, folderId: string): Promise<boolean> {
+  const drive = getDrive();
+  const res = await withRetry(() =>
+    drive.files.get({ fileId, fields: 'parents', ...SHARED_DRIVE_PARAMS }),
+  );
+  return (res.data.parents ?? []).includes(folderId);
+}

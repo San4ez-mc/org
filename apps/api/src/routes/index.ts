@@ -7,6 +7,8 @@ import { requireApiSecret } from '../middleware/auth';
 import { handleAct } from '../services/agent';
 import { indexInstruction, findRelatedInstructions, indexDriveDocuments, vectorEnabled, createSubToken, listVectorTokens, deleteVectorToken, vectorSearch, flowsGenerate } from '../services/vector';
 import { startDriveIndex, getIndexProgress } from '../services/driveIndexer';
+import { driveTools } from './driveTools';
+import { agentTools } from './agentTools';
 
 /**
  * Контракт API платформи (§8 PLAN_PHASE1.md).
@@ -16,6 +18,12 @@ import { startDriveIndex, getIndexProgress } from '../services/driveIndexer';
 export const api = Router();
 
 api.use(requireApiSecret);
+
+// Інструменти асистента над Drive/Sheets (Digital Hiring). Auth успадковується вище.
+api.use('/drive', driveTools);
+
+// Інструменти бота над орг-структурою (читання, посади, теки).
+api.use('/agent-tools', agentTools);
 
 /** Записати зміну в журнал (не блокує основну дію). */
 async function logChange(companyId: string, entity: string, action: string, summary: string, author?: string, unitId?: string) {
