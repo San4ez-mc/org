@@ -80,3 +80,29 @@ export const SHARED_DRIVE_PARAMS = {
   supportsAllDrives: true,
   includeItemsFromAllDrives: true,
 } as const;
+
+/**
+ * Дані для екрана підключення Диска: що саме показати клієнту, щоб він видав доступ.
+ * Читається з живої конфігурації, а не з константи в інтерфейсі — інакше при зміні
+ * ключа інструкція почне брехати, і клієнт розшарить теку не на ту адресу.
+ */
+export function connectionInfo(): {
+  mode: 'oauth' | 'service_account';
+  serviceAccountEmail: string | null;
+  oauthClientId: string | null;
+} {
+  let serviceAccountEmail: string | null = null;
+  const keyPath = process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
+  if (keyPath && existsSync(keyPath)) {
+    try {
+      serviceAccountEmail = JSON.parse(readFileSync(keyPath, 'utf8')).client_email ?? null;
+    } catch {
+      serviceAccountEmail = null;
+    }
+  }
+  return {
+    mode: authMode(),
+    serviceAccountEmail,
+    oauthClientId: process.env.GOOGLE_OAUTH_CLIENT_ID ?? null,
+  };
+}

@@ -8,6 +8,7 @@ import {
   appendSheetValues,
   findFolderByName,
   isFileInFolder,
+  connectionInfo,
 } from '@platform/drive';
 
 /**
@@ -86,6 +87,14 @@ async function resolveWritableFolder(rootFolderId: string, folder: string): Prom
   if (!id) throw new Error(`Теку "${folder}" не знайдено під коренем проєкту`);
   return id;
 }
+
+/** Дані для екрана підключення: на яку адресу клієнт має розшарити теку. */
+driveTools.get(
+  '/connection-info',
+  route(async (_req, res) => {
+    res.json(connectionInfo());
+  }),
+);
 
 // ── Drive ────────────────────────────────────────────────────────────────────
 

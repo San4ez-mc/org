@@ -1,4 +1,4 @@
-import { getCompany } from '@/lib/api';
+import { getCompany, getDriveConnectionInfo } from '@/lib/api';
 import CompanyHeader from '@/components/CompanyTabs';
 import DriveConnectPanel from '@/components/DriveConnectPanel';
 import DriveTreeManager from '@/components/DriveTreeManager';
@@ -19,13 +19,18 @@ export default async function CompanyFolder({ params }: { params: { id: string }
     return <p style={{ color: 'hsl(var(--muted-foreground))' }}>Компанію не знайдено або API недоступний.</p>;
   }
 
+  // Дані для майстра підключення. Якщо API недоступний — панель просто працює
+  // у старому вигляді, без інструкцій.
+  let connInfo = null;
+  try { connInfo = await getDriveConnectionInfo(); } catch { /* необовʼязкове */ }
+
   return (
     <div>
       <CompanyHeader company={company} />
       <a href={`/company/${company.id}`} style={{ display: 'inline-block', margin: '4px 0 12px', fontSize: 13, color: 'hsl(var(--primary))', textDecoration: 'none' }}>
         ← Повернутись до плану
       </a>
-      <DriveConnectPanel companyId={company.id} driveRootFolderId={company.driveRootFolderId} />
+      <DriveConnectPanel companyId={company.id} driveRootFolderId={company.driveRootFolderId} connectionInfo={connInfo} />
       {/* #302 Коли папка прив'язана — дерево показуємо ЗАВЖДИ (виключення тут же). */}
       {company.driveRootFolderId && <DriveTreeManager companyId={company.id} />}
       {/* #303 Крок 3: асинхронна індексація у вектор з прогресом. */}

@@ -3,6 +3,7 @@ import { useState, useTransition } from 'react';
 import { connectDriveFolder, analyzeDrive } from '@/app/company/[id]/actions';
 import type { AnalyzeReport } from '@/lib/drive-types';
 import DriveTree from './DriveTree';
+import DriveAccessGuide, { type DriveConnectionInfo } from './DriveAccessGuide';
 
 const card: React.CSSProperties = {
   background: 'hsl(var(--card))', border: '1px solid hsl(var(--border))',
@@ -14,7 +15,7 @@ const btn: React.CSSProperties = {
 };
 const secBtn: React.CSSProperties = { ...btn, background: 'transparent', color: 'hsl(var(--muted-foreground))' };
 
-export default function DriveConnectPanel({ companyId, driveRootFolderId }: { companyId: string; driveRootFolderId: string | null }) {
+export default function DriveConnectPanel({ companyId, driveRootFolderId, connectionInfo = null }: { companyId: string; driveRootFolderId: string | null; connectionInfo?: DriveConnectionInfo | null }) {
   const [connected, setConnected] = useState<string | null>(driveRootFolderId);
   const [input, setInput] = useState('');
   const [index, setIndex] = useState(true);
@@ -65,17 +66,13 @@ export default function DriveConnectPanel({ companyId, driveRootFolderId }: { co
       </p>
 
       {!connected ? (
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          <input
-            value={input} onChange={(e) => setInput(e.target.value)}
-            placeholder="drive.google.com/drive/folders/…  або id папки"
-            style={{ flex: 1, minWidth: 260, padding: '8px 10px', borderRadius: 8, border: '1px solid hsl(var(--border))', background: 'hsl(var(--background))', color: 'inherit', fontSize: 13 }}
-            onKeyDown={(e) => e.key === 'Enter' && doConnect()}
-          />
-          <button style={btn} onClick={doConnect} disabled={pending || !input.trim()}>
-            {phase === 'connecting' ? 'Підключаю…' : 'Підключити'}
-          </button>
-        </div>
+        <DriveAccessGuide
+          info={connectionInfo}
+          folderInput={input}
+          onFolderInput={setInput}
+          onConnect={doConnect}
+          pending={pending && phase === 'connecting'}
+        />
       ) : (
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
           <a href={`https://drive.google.com/drive/folders/${connected}`} target="_blank" style={{ fontSize: 13, color: 'hsl(var(--primary))' }}>

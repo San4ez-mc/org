@@ -196,6 +196,11 @@ model Member {
   role             MemberRole @default(EMPLOYEE)
   accessToken      String?    @unique // особисте посилання входу до порталу працівника
 
+  // Звʼязок із користувачем SSO. Одна людина може працювати в кількох компаніях —
+  // тоді це кілька Member з тим самим ssoUserId, тому унікальність лише в межах компанії.
+  // Ставиться явно: спільного ключа з SSO (email) у даних немає.
+  ssoUserId        String?
+
   // Життєвий цикл працівника (#211)
   hireDate         DateTime?    // дата прийому
   status           MemberStatus @default(EMPLOYED)
@@ -208,6 +213,8 @@ model Member {
   botLinks BotLink[]
 
   @@unique([companyId, telegramUserId])
+  @@unique([companyId, ssoUserId])
+  @@index([ssoUserId])
   @@index([companyId])
 }
 

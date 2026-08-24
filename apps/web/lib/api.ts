@@ -258,3 +258,8 @@ export async function getSubCompanies(companyId: string): Promise<{ id: string; 
   const { subCompanies } = await api<{ subCompanies: { id: string; name: string; abbr: string | null }[] }>(`/companies/${companyId}/sub-companies`);
   return subCompanies;
 }
+
+/** На яку адресу клієнт має видати доступ до Диска — читається з живої конфігурації сервера. */
+export async function getDriveConnectionInfo(): Promise<import('@/components/DriveAccessGuide').DriveConnectionInfo> {
+  return api('/drive/connection-info');
+}
