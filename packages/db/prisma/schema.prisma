@@ -71,6 +71,7 @@ model Company {
   driveInstructionsFolderId String? // #310 (3d) тека на Drive, куди система пише посадові інструкції
   structureProposal Json?   // #311 (3e) чернетка запропонованої ШІ структури папок (tree + описи + moves)
   orgSheetId        String? // Google Sheet з оргсхемою
+  assistantMemory   AssistantMemory[]
   crmSheetId        String? // CRM-таблиця асистента (Digital Hiring); id тримаємо тут, щоб модель його не бачила
   googleAccountId   String? // прив'язаний OAuth Google-акаунт (для Drive/Sheets/Docs)
 
@@ -504,4 +505,18 @@ model Proposal {
 
   @@index([companyId, status])
   @@index([targetInstructionId])
+}
+
+// Довга памʼять асистента: стійкі факти, що переживають сесію.
+// Тримаємо в БД як джерело правди, а у вектор індексуємо копію — щоб можна було
+// спитати «що ми вирішували по клієнту N» і знайти змістом, а не гортанням.
+model AssistantMemory {
+  id        String   @id @default(uuid())
+  companyId String
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  text      String
+  tag       String?  // напр. «клієнт», «домовленість», «заборона»
+  createdAt DateTime @default(now())
+
+  @@index([companyId, createdAt])
 }

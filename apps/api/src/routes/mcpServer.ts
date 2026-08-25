@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { prisma } from '@platform/db';
+import { vectorSearch } from '../services/vector';
 import {
   searchFiles, readFileById, writeFile,
   readSheetRows, updateSheetRow, appendSheetValues,
@@ -30,6 +31,25 @@ interface Ctx {
   companyId: string;
   driveRootFolderId: string | null;
   crmSheetId: string | null;
+  vectorToken: string | null;
+}
+
+/** Копія запису памʼяті у вектор-проєкт компанії — щоб шукалось змістом. */
+async function indexMemoryNote(token: string, companyId: string, noteId: string, text: string): Promise<void> {
+  await fetch(`${process.env.VECTOR_URL || 'http://127.0.0.1:4500'}/ingest`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({
+      collection: 'dynamic',
+      chunks: [{
+        source: 'Памʼять асистента',
+        content: text,
+        folderId: '',
+        metadata: { companyId, noteId, kind: 'assistant-memory' },
+      }],
+    }),
+    signal: AbortSignal.timeout(8000),
+  });
 }
 
 const TOOLS = [
@@ -144,6 +164,31 @@ const TOOLS = [
         details: { type: 'object', description: 'Довільні деталі зміни' },
       },
       required: ['action', 'reason'],
+    },
+  },
+  {
+    name: 'memory_write',
+    domain: 'memory',
+    description: 'Запамʼятати стійкий факт: домовленість, побажання, заборону, стан пошуку. Пиши коротко й по суті — це переживе поточну розмову. Не дублюй те, що вже є.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        text: { type: 'string', description: 'Один факт одним-двома реченнями' },
+        tag: { type: 'string', description: 'Напр. клієнт, домовленість, заборона' },
+      },
+      required: ['text'],
+    },
+  },
+  {
+    name: 'memory_read',
+    domain: 'memory',
+    description: 'Що вже відомо з попередніх розмов. Без query повертає найсвіжіше; з query шукає за змістом. Заглядай сюди на початку розмови і коли згадують минулі домовленості.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Про що згадати; порожній — останні записи' },
+        limit: { type: 'number' },
+      },
     },
   },
   {
@@ -371,6 +416,46 @@ async function callTool(name: string, args: any, ctx: Ctx): Promise<unknown> {
       };
     }
 
+    case 'memory_write': {
+      const text = String(args?.text ?? '').trim();
+      if (!text) throw new Error('Порожній запис памʼяті');
+      const note = await prisma.assistantMemory.create({
+        data: { companyId: ctx.companyId, text, tag: args?.tag ? String(args.tag) : null },
+        select: { id: true, createdAt: true },
+      });
+
+      // Копія у вектор — щоб памʼять шукалась змістом. Best-effort: якщо вектор
+      // недоступний, запис усе одно збережено, і це головне.
+      if (ctx.vectorToken) {
+        void indexMemoryNote(ctx.vectorToken, ctx.companyId, note.id, text).catch(() => {});
+      }
+      return { ok: true, id: note.id, note: 'Запамʼятав.' };
+    }
+
+    case 'memory_read': {
+      const limit = Math.min(Math.max(Number(args?.limit) || 10, 1), 50);
+      const query = String(args?.query ?? '').trim();
+
+      if (query && ctx.vectorToken) {
+        const found = await vectorSearch(ctx.vectorToken, query, limit);
+        const hits = (found?.results || []).filter((r: any) => r?.metadata?.kind === 'assistant-memory');
+        if (hits.length) {
+          return { mode: 'semantic', count: hits.length, notes: hits.map((h: any) => h.content) };
+        }
+      }
+
+      const rows = await prisma.assistantMemory.findMany({
+        where: {
+          companyId: ctx.companyId,
+          ...(query ? { text: { contains: query, mode: 'insensitive' as const } } : {}),
+        },
+        orderBy: { createdAt: 'desc' },
+        take: limit,
+        select: { text: true, tag: true, createdAt: true },
+      });
+      return { mode: query ? 'text' : 'recent', count: rows.length, notes: rows };
+    }
+
     default:
       throw new Error(`Невідомий інструмент: ${name}`);
   }
@@ -381,7 +466,7 @@ async function callTool(name: string, args: any, ctx: Ctx): Promise<unknown> {
  * і схеми чужих доменів не з'їдають її контекст: асистенту рекрутера інструменти
  * редагування орг-структури не потрібні.
  */
-const DOMAINS = ['drive', 'crm', 'org', 'process'] as const;
+const DOMAINS = ['drive', 'crm', 'org', 'process', 'memory'] as const;
 
 mcpServer.post('/:domain', async (req, res) => {
   // Секрет обовʼязковий: порожнє значення означає «не налаштовано», і тоді
@@ -416,7 +501,7 @@ mcpServer.post('/:domain', async (req, res) => {
 
       const company = await prisma.company.findUnique({
         where: { id: companyId },
-        select: { id: true, driveRootFolderId: true, crmSheetId: true },
+        select: { id: true, driveRootFolderId: true, crmSheetId: true, vectorToken: true },
       });
       if (!company) return void fail(-32602, 'Компанію не знайдено');
 
@@ -429,6 +514,7 @@ mcpServer.post('/:domain', async (req, res) => {
         companyId: company.id,
         driveRootFolderId: company.driveRootFolderId,
         crmSheetId: company.crmSheetId,
+        vectorToken: company.vectorToken,
       });
 
       // MCP віддає результат як content-блоки; текст із JSON читається моделлю нормально.
