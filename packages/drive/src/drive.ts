@@ -398,6 +398,25 @@ async function isDescendantOf(
 }
 
 /**
+ * Область пошуку. Дефолтний corpora='user' покриває тільки файли, які користувач
+ * створив, відкривав або які розшарені йому напряму — файли спільного диска,
+ * до яких він ще не звертався, у fullText-видачу не потрапляють.
+ * Тому для теки у спільному диску шукаємо адресно (corpora='drive'), інакше — по всіх.
+ */
+async function searchScope(folderId?: string): Promise<{ corpora: string; driveId?: string }> {
+  if (folderId) {
+    try {
+      const meta = await getFileMeta(folderId);
+      const driveId = (meta as { driveId?: string | null }).driveId;
+      if (driveId) return { corpora: 'drive', driveId };
+    } catch {
+      // тека недоступна або лежить у My Drive — падаємо у загальний пошук
+    }
+  }
+  return { corpora: 'allDrives' };
+}
+
+/**
  * Пошук файлів за назвою і вмістом. `folderId` обмежує видачу текою та її підтеками
  * (фільтруємо по факту — див. isDescendantOf).
  */
@@ -406,6 +425,7 @@ export async function searchFiles(query: string, folderId?: string, limit = 20):
   if (!term) return [];
   const drive = getDrive();
   const cap = Math.min(Math.max(limit, 1), 100);
+  const scope = await searchScope(folderId);
 
   const q =
     `(name contains '${term}' or fullText contains '${term}')` +
@@ -423,6 +443,7 @@ export async function searchFiles(query: string, folderId?: string, limit = 20):
         orderBy: 'modifiedTime desc',
         pageSize: folderId ? 100 : cap,
         pageToken,
+        ...scope,
         ...SHARED_DRIVE_PARAMS,
       }),
     );

@@ -133,7 +133,8 @@ api.get('/companies/:id', async (req, res) => {
 // #213 Стратегічний шар + #219 материнська/дочірні + #200 Drive — оновлення компанії
 api.patch('/companies/:id', async (req, res) => {
   try {
-    const { name, abbr, mission, companyCkp, idealPicture, parentCompanyId, driveRootFolderId, orgSheetId, adizesStage } = req.body ?? {};
+    const { name, abbr, mission, companyCkp, idealPicture, parentCompanyId, driveRootFolderId, orgSheetId, adizesStage,
+      driveScanFolderId, driveWriteFolderId, driveWritableFolders } = req.body ?? {};
     const company = await prisma.company.update({
       where: { id: req.params.id },
       data: {
@@ -145,6 +146,12 @@ api.patch('/companies/:id', async (req, res) => {
         ...(adizesStage !== undefined && { adizesStage: adizesStage || null }),
         ...(parentCompanyId !== undefined && { parentCompanyId: parentCompanyId || null }),
         ...(driveRootFolderId !== undefined && { driveRootFolderId: driveRootFolderId || null }),
+        // Області асистента: порожнє сканування = весь диск, порожній запис = запис вимкнено.
+        ...(driveScanFolderId !== undefined && { driveScanFolderId: driveScanFolderId || null }),
+        ...(driveWriteFolderId !== undefined && { driveWriteFolderId: driveWriteFolderId || null }),
+        ...(Array.isArray(driveWritableFolders) && {
+          driveWritableFolders: driveWritableFolders.map((x: unknown) => String(x).trim()).filter(Boolean),
+        }),
         ...(orgSheetId !== undefined && { orgSheetId: orgSheetId || null }),
       },
     });

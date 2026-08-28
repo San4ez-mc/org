@@ -55,12 +55,22 @@ export function getAuth(): OAuth2Client | InstanceType<typeof google.auth.Google
     throw new Error('Немає ні OAuth refresh token, ні GOOGLE_SERVICE_ACCOUNT_JSON');
   }
   const credentials = JSON.parse(readFileSync(keyPath, 'utf8'));
+
+  // Domain-wide delegation: сервіс-акаунт діє від імені користувача домену, тож
+  // працює його квота і його «Мій диск». Вмикається лише коли адміністратор Workspace
+  // видав дозвіл і в конфізі вказано, за кого діяти — без цієї змінної поведінка стара.
+  const subject = process.env.GOOGLE_IMPERSONATE_USER?.trim();
+  if (subject) {
+    return new google.auth.GoogleAuth({ credentials, scopes: SCOPES, clientOptions: { subject } });
+  }
+
   return new google.auth.GoogleAuth({ credentials, scopes: SCOPES });
 }
 
 /** Який спосіб авторизації активний зараз (для діагностики). */
-export function authMode(): 'oauth' | 'service_account' {
-  return readRefreshToken() ? 'oauth' : 'service_account';
+export function authMode(): 'oauth' | 'service_account' | 'domain_delegation' {
+  if (readRefreshToken()) return 'oauth';
+  return process.env.GOOGLE_IMPERSONATE_USER?.trim() ? 'domain_delegation' : 'service_account';
 }
 
 export function getDrive() {
@@ -87,7 +97,7 @@ export const SHARED_DRIVE_PARAMS = {
  * ключа інструкція почне брехати, і клієнт розшарить теку не на ту адресу.
  */
 export function connectionInfo(): {
-  mode: 'oauth' | 'service_account';
+  mode: ReturnType<typeof authMode>;
   serviceAccountEmail: string | null;
   oauthClientId: string | null;
 } {

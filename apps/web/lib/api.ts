@@ -7,6 +7,10 @@ export interface Company {
   name: string;
   abbr: string | null;
   driveRootFolderId: string | null;
+  /** Області асистента: читання і запис налаштовуються окремо. */
+  driveScanFolderId?: string | null;
+  driveWriteFolderId?: string | null;
+  driveWritableFolders?: string[];
   driveExcludedIds?: string[];
   driveIndexedAt?: string | null;
   driveIndexedCount?: number;

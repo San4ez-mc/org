@@ -19,7 +19,9 @@
     "auth:google": "tsx scripts/google-auth.ts",
     "smoke:drive": "tsx scripts/drive-smoke.ts",
     "create:company": "tsx scripts/create-company.ts",
-    "index:knowledge": "tsx scripts/index-knowledge.ts"
+    "index:knowledge": "tsx scripts/index-knowledge.ts",
+    "smoke:dh-drive": "tsx scripts/dh-drive-smoke.ts",
+    "backfill:drive-scope": "tsx scripts/backfill-drive-scope.ts"
   },
   "devDependencies": {
     "@platform/ai": "0.1.0",

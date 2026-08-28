@@ -6,10 +6,9 @@ import {
   readSheetRows,
   updateSheetRow,
   appendSheetValues,
-  findFolderByName,
-  isFileInFolder,
   connectionInfo,
 } from '@platform/drive';
+import { loadDriveScope, resolveWriteTarget, assertFileWritable } from '../services/driveScope';
 
 /**
  * Інструменти асистента над Drive/Sheets (ТЗ Digital Hiring §0.1, §4).
@@ -20,14 +19,6 @@ import {
  * контракт для воронки читався в одному місці.
  */
 export const driveTools = Router();
-
-/**
- * Теки, у які асистенту дозволено писати (ТЗ §4.5).
- * `01_База_знань` свідомо відсутня: на ній тримається стиль у векторі,
- * і агент не має змоги її зіпсувати. Перевірка серверна — на боці Flows
- * гачка для валідації немає (інструмент там це лише url + inputSchema).
- */
-const WRITABLE_FOLDERS = /^0[2345]_/;
 
 type Handler = (req: any, res: any) => Promise<unknown>;
 
@@ -78,15 +69,6 @@ function recordToRow(header: string[], record: Record<string, unknown>): (string
   });
 }
 
-/** Знайти теку за назвою під коренем проєкту, з перевіркою whitelist. */
-async function resolveWritableFolder(rootFolderId: string, folder: string): Promise<string> {
-  if (!WRITABLE_FOLDERS.test(folder)) {
-    throw new Error(`Тека "${folder}" не дозволена для запису. Доступні: 02_, 03_, 04_, 05_`);
-  }
-  const id = await findFolderByName(rootFolderId, folder);
-  if (!id) throw new Error(`Теку "${folder}" не знайдено під коренем проєкту`);
-  return id;
-}
 
 /** Дані для екрана підключення: на яку адресу клієнт має розшарити теку. */
 driveTools.get(
@@ -103,9 +85,10 @@ driveTools.post(
   '/search',
   route(async (req, res) => {
     const query = need(req, 'query');
-    const folderId = param(req, 'folderId') ? String(param(req, 'folderId')).trim() : undefined;
     const limit = Number(param(req, 'limit')) || 20;
-    const files = await searchFiles(query, folderId, limit);
+    // Область читання — з картки компанії, а не з аргумента: інакше викликач сам вирішував би, що йому видно.
+    const scope = await loadDriveScope(need(req, 'companyId'));
+    const files = await searchFiles(query, scope.scanFolderId, limit);
     res.json({ count: files.length, files });
   }),
 );
@@ -127,19 +110,17 @@ driveTools.post(
 driveTools.post(
   '/file/write',
   route(async (req, res) => {
-    const rootFolderId = need(req, 'rootFolderId');
-    const folder = need(req, 'folder');
+    const companyId = need(req, 'companyId');
+    const folder = String(param(req, 'folder') ?? '');
     const filename = need(req, 'filename');
     const content = String(param(req, 'content') ?? '');
     const fileId = param(req, 'fileId') ? String(param(req, 'fileId')).trim() : undefined;
 
-    const folderId = await resolveWritableFolder(rootFolderId, folder);
+    const scope = await loadDriveScope(companyId);
+    const folderId = await resolveWriteTarget(scope, folder);
 
-    // id прийшов ззовні — переконуємось, що файл справді лежить у дозволеній теці,
-    // інакше через fileId можна було б обійти whitelist.
-    if (fileId && !(await isFileInFolder(fileId, folderId))) {
-      throw new Error(`Файл ${fileId} не належить теці "${folder}" — запис відхилено`);
-    }
+    // id прийшов ззовні — інакше через нього можна було б записати в будь-який файл на диску.
+    if (fileId) await assertFileWritable(folderId, fileId);
 
     const result = await writeFile(folderId, filename, content, fileId);
     res.json({ ...result, folder, filename });

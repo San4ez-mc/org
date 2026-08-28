@@ -129,6 +129,36 @@ export async function connectDriveFolder(companyId: string, input: string): Prom
   return { folderId };
 }
 
+export interface AssistantScope {
+  driveScanFolderId: string | null;
+  driveWriteFolderId: string | null;
+  driveWritableFolders: string[];
+}
+
+/**
+ * Області роботи асистента з Диском. Порожнє посилання — осмислене значення,
+ * а не «не заповнено»: без теки сканування читається весь диск, без теки запису запис вимкнений.
+ */
+export async function saveAssistantScope(companyId: string, scope: {
+  scanInput: string; writeInput: string; writableFolders: string[];
+}): Promise<AssistantScope> {
+  const parse = (v: string, label: string) => {
+    const t = v.trim();
+    if (!t) return null;
+    const id = extractFolderId(t);
+    if (!id) throw new Error(`Не розпізнав теку для ${label}. Встав посилання виду drive.google.com/drive/folders/… або сам id.`);
+    return id;
+  };
+  const body = {
+    driveScanFolderId: parse(scope.scanInput, 'сканування'),
+    driveWriteFolderId: parse(scope.writeInput, 'запису'),
+    driveWritableFolders: scope.writableFolders,
+  };
+  await call(`/companies/${companyId}`, 'PATCH', body);
+  revalidatePath(`/company/${companyId}/folder`);
+  return body as AssistantScope;
+}
+
 /** #302 Легке дерево Диску (лише метадані) + список виключених id. Для сторінки «Папка». */
 export async function getDriveTree(companyId: string): Promise<{ tree: import('@/lib/drive-types').DriveNode[]; excludedIds: string[]; connected: boolean }> {
   return call(`/companies/${companyId}/drive-tree`, 'GET');

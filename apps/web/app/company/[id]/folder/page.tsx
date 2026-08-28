@@ -2,6 +2,7 @@ import { getCompany, getDriveConnectionInfo } from '@/lib/api';
 import CompanyHeader from '@/components/CompanyTabs';
 import DriveConnectPanel from '@/components/DriveConnectPanel';
 import DriveTreeManager from '@/components/DriveTreeManager';
+import AssistantScopePanel from '@/components/AssistantScopePanel';
 import DriveIndexPanel from '@/components/DriveIndexPanel';
 import DriveDetectPanel from '@/components/DriveDetectPanel';
 import InstructionsFolderPanel from '@/components/InstructionsFolderPanel';
@@ -31,6 +32,12 @@ export default async function CompanyFolder({ params }: { params: { id: string }
         ← Повернутись до плану
       </a>
       <DriveConnectPanel companyId={company.id} driveRootFolderId={company.driveRootFolderId} connectionInfo={connInfo} />
+      <AssistantScopePanel
+        companyId={company.id}
+        scanFolderId={company.driveScanFolderId ?? null}
+        writeFolderId={company.driveWriteFolderId ?? null}
+        writableFolders={company.driveWritableFolders ?? []}
+      />
       {/* #302 Коли папка прив'язана — дерево показуємо ЗАВЖДИ (виключення тут же). */}
       {company.driveRootFolderId && <DriveTreeManager companyId={company.id} />}
       {/* #303 Крок 3: асинхронна індексація у вектор з прогресом. */}

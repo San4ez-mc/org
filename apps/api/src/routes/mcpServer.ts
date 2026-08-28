@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { prisma } from '@platform/db';
 import { vectorSearch } from '../services/vector';
+import { loadDriveScope, resolveWriteTarget, type DriveScope } from '../services/driveScope';
 import {
   searchFiles, readFileById, writeFile,
   readSheetRows, updateSheetRow, appendSheetValues,
@@ -24,12 +25,12 @@ export const mcpServer = Router();
 
 const SECRET = process.env.MCP_TOOLS_SECRET || '';
 
-/** Теки, у які асистенту дозволено писати. `01_База_знань` навмисно відсутня. */
-const WRITABLE = /^0[2345]_/;
-
 interface Ctx {
   companyId: string;
+  /** Корінь структури компанії (орг-теки, індексація). Області асистента живуть у scope. */
   driveRootFolderId: string | null;
+  /** Що читаємо і куди пишемо — з полів компанії, не з констант. */
+  scope: DriveScope;
   crmSheetId: string | null;
   vectorToken: string | null;
 }
@@ -246,19 +247,16 @@ async function callTool(name: string, args: any, ctx: Ctx): Promise<unknown> {
 
   switch (name) {
     case 'drive_search': {
-      const files = await searchFiles(String(args?.query ?? ''), needDrive(), Number(args?.limit) || 20);
+      // scanFolderId порожній = весь диск клієнта. На область запису це не впливає.
+      const files = await searchFiles(String(args?.query ?? ''), ctx.scope.scanFolderId, Number(args?.limit) || 20);
       return { count: files.length, files };
     }
     case 'drive_read':
       return readFileById(String(args?.fileId ?? ''));
 
     case 'drive_write': {
-      const folder = String(args?.folder ?? '');
-      // Whitelist серверний, а не в промпті: промпт модель може проігнорувати.
-      if (!WRITABLE.test(folder)) {
-        throw new Error(`Тека "${folder}" не дозволена для запису. Доступні: 02_, 03_, 04_, 05_`);
-      }
-      const folderId = await resolveFolder(needDrive(), folder);
+      // Перевірка серверна, а не в промпті: промпт модель може проігнорувати.
+      const folderId = await resolveWriteTarget(ctx.scope, String(args?.folder ?? ''));
       return writeFile(folderId, String(args?.filename ?? ''), String(args?.content ?? ''));
     }
 
@@ -513,6 +511,7 @@ mcpServer.post('/:domain', async (req, res) => {
       const data = await callTool(String(params?.name), params?.arguments, {
         companyId: company.id,
         driveRootFolderId: company.driveRootFolderId,
+        scope: await loadDriveScope(company.id),
         crmSheetId: company.crmSheetId,
         vectorToken: company.vectorToken,
       });
