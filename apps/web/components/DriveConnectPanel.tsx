@@ -23,6 +23,9 @@ export default function DriveConnectPanel({ companyId, driveRootFolderId, connec
   const [err, setErr] = useState('');
   const [pending, start] = useTransition();
   const [phase, setPhase] = useState<'idle' | 'connecting' | 'analyzing'>('idle');
+  // Майстер доступу треба вміти відкрити й після підключення: спосіб доступу
+  // міняють окремо від теки (напр. вмикають делегування вже на робочій компанії).
+  const [guideOpen, setGuideOpen] = useState(false);
 
   function doConnect() {
     setErr('');
@@ -65,27 +68,40 @@ export default function DriveConnectPanel({ companyId, driveRootFolderId, connec
         Підключи кореневу папку компанії на Диску — система зіставить теки з орг-структурою й (за бажанням) проіндексує всі файли у вектор-базу для семантичного пошуку.
       </p>
 
-      {!connected ? (
-        <DriveAccessGuide
-          info={connectionInfo}
-          folderInput={input}
-          onFolderInput={setInput}
-          onConnect={doConnect}
-          pending={pending && phase === 'connecting'}
-          companyId={companyId}
-          impersonateUser={impersonateUser}
-        />
+      {!connected || guideOpen ? (
+        <>
+          <DriveAccessGuide
+            info={connectionInfo}
+            folderInput={input}
+            onFolderInput={setInput}
+            onConnect={doConnect}
+            pending={pending && phase === 'connecting'}
+            companyId={companyId}
+            impersonateUser={impersonateUser}
+          />
+          {connected && (
+            <button style={{ ...secBtn, marginTop: 10 }} onClick={() => setGuideOpen(false)}>
+              Згорнути налаштування доступу
+            </button>
+          )}
+        </>
       ) : (
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
           <a href={`https://drive.google.com/drive/folders/${connected}`} target="_blank" style={{ fontSize: 13, color: 'hsl(var(--primary))' }}>
             ✅ Підключено: {connected.slice(0, 12)}…
           </a>
+          {impersonateUser && (
+            <span style={{ fontSize: 12.5, color: 'hsl(var(--muted-foreground))' }}>
+              працюємо від імені <b>{impersonateUser}</b>
+            </span>
+          )}
           <label style={{ fontSize: 12.5, display: 'flex', alignItems: 'center', gap: 5, color: 'hsl(var(--muted-foreground))' }}>
             <input type="checkbox" checked={index} onChange={(e) => setIndex(e.target.checked)} /> індексувати файли у вектор-базу
           </label>
           <button style={btn} onClick={doAnalyze} disabled={pending}>
             {phase === 'analyzing' ? 'Читаю…' : '📋 Отримати список файлів та папок'}
           </button>
+          <button style={secBtn} onClick={() => setGuideOpen(true)}>Змінити спосіб доступу</button>
           <button style={secBtn} onClick={disconnect} disabled={pending}>Відв'язати</button>
         </div>
       )}
