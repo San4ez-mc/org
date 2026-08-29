@@ -46,6 +46,11 @@ export default function LoginPage({ searchParams }: { searchParams: { e?: string
         {searchParams.e === 'sso' && (
           <div style={{ fontSize: 12, color: '#f0a0a0', marginBottom: 14 }}>Не вдалося увійти через FINEKO. Спробуйте ще раз.</div>
         )}
+        {searchParams.e === 'noaccess' && (
+          <div style={{ fontSize: 12, color: '#f0a0a0', marginBottom: 14 }}>
+            Вхід виконано, але вам ще не відкрито жодної компанії. Зверніться до адміністратора.
+          </div>
+        )}
         <a
           href="/auth/sso"
           style={{

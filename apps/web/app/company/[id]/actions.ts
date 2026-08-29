@@ -1,11 +1,26 @@
 'use server';
 import { revalidatePath } from 'next/cache';
 import type { AnalyzeReport } from '@/lib/drive-types';
+import { canSeeCompany, currentAccess } from '@/lib/access';
 
 const BASE = process.env.ORG_API_URL ?? 'http://127.0.0.1:4100/api';
 const TOKEN = process.env.ORG_API_TOKEN ?? '';
 
+/**
+ * Серверні дії — окрема точка входу: layout їх не прикриває, бо вони викликаються
+ * напряму, без переходу на сторінку. Тому перевіряємо тут окремо.
+ *
+ * Перехоплюємо шляхи виду `/companies/<id>/…`. Дії над окремими сутностями
+ * (`/members/<id>`, `/org-units/<id>`, `/processes/<id>`) звідси не видно — власника
+ * знає лише API, і повне закриття цієї частини робиться на його боці.
+ */
+const COMPANY_PATH = /^\/companies\/([0-9a-f-]{36})(\/|$)/i;
+
 async function call(path: string, method: string, body?: unknown) {
+  const scoped = COMPANY_PATH.exec(path);
+  if (scoped && !canSeeCompany(currentAccess(), scoped[1])) {
+    throw new Error('Немає доступу до цієї компанії');
+  }
   const res = await fetch(`${BASE}${path}`, {
     method,
     headers: { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json' },

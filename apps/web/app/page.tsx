@@ -1,14 +1,26 @@
 import { getCompanies } from '@/lib/api';
 import AddCompanyButton from '@/components/AddCompanyButton';
+import { currentAccess, visibleCompanies } from '@/lib/access';
 
 export const dynamic = 'force-dynamic';
 
 export default async function CompaniesPage() {
+  const access = currentAccess();
   let companies;
   try {
-    companies = await getCompanies();
+    // Фільтруємо на сервері: віддавати клієнту повний список і ховати зайве
+    // стилями означало б, що дані все одно поїхали в браузер.
+    companies = visibleCompanies(access, await getCompanies());
   } catch {
     return <p style={{ color: 'hsl(var(--muted-foreground))' }}>Не вдалось завантажити компанії (API недоступний).</p>;
+  }
+
+  if (!companies.length) {
+    return (
+      <p style={{ color: 'hsl(var(--muted-foreground))' }}>
+        Вам ще не відкрито жодної компанії. Зверніться до адміністратора.
+      </p>
+    );
   }
 
   return (
