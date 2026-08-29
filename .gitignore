@@ -24,3 +24,9 @@ _refs/
 # Next.js
 .next/
 next-env.d.ts
+
+# GCP service-account ключ — НІКОЛИ в git
+proccess-org-ai-bot-*.json
+*-service-account*.json
+secrets/
+packages/db/prisma/schema.local.prisma
