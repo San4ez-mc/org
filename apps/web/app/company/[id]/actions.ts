@@ -144,6 +144,26 @@ export async function connectDriveFolder(companyId: string, input: string): Prom
   return { folderId };
 }
 
+/**
+ * Увімкнути делегування домену для компанії.
+ *
+ * Порожня пошта вимикає його — тоді платформа знову працює звичайним сервісним
+ * акаунтом. Область читання одразу ставимо порожньою: сенс делегування саме в тому,
+ * щоб бачити весь Диск, а межу тримає окреме поле теки для запису.
+ */
+export async function saveGoogleDelegation(companyId: string, email: string): Promise<{ email: string | null }> {
+  const value = email.trim().toLowerCase();
+  if (value && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(value)) {
+    throw new Error('Схоже, це не поштова адреса');
+  }
+  await call(`/companies/${companyId}`, 'PATCH', {
+    googleImpersonateUser: value || null,
+    ...(value ? { driveScanFolderId: null } : {}),
+  });
+  revalidatePath(`/company/${companyId}/folder`);
+  return { email: value || null };
+}
+
 export interface AssistantScope {
   driveScanFolderId: string | null;
   driveWriteFolderId: string | null;

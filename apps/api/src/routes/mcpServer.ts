@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { prisma } from '@platform/db';
 import { vectorSearch } from '../services/vector';
 import { loadDriveScope, resolveWriteTarget, type DriveScope } from '../services/driveScope';
+import { runAsUser } from '@platform/drive';
 import {
   searchFiles, readFileById, writeFile,
   readSheetRows, updateSheetRow, appendSheetValues,
@@ -508,13 +509,18 @@ mcpServer.post('/:domain', async (req, res) => {
         return void fail(-32602, `Інструмент ${params?.name} не належить домену ${domain}`);
       }
 
-      const data = await callTool(String(params?.name), params?.arguments, {
-        companyId: company.id,
-        driveRootFolderId: company.driveRootFolderId,
-        scope: await loadDriveScope(company.id),
-        crmSheetId: company.crmSheetId,
-        vectorToken: company.vectorToken,
-      });
+      const scope = await loadDriveScope(company.id);
+      // Уся робота інструмента — в контексті цієї компанії: якщо в неї налаштоване
+      // делегування, запити до Google підуть від імені її користувача.
+      const data = await runAsUser(scope.impersonateUser, () =>
+        callTool(String(params?.name), params?.arguments, {
+          companyId: company.id,
+          driveRootFolderId: company.driveRootFolderId,
+          scope,
+          crmSheetId: company.crmSheetId,
+          vectorToken: company.vectorToken,
+        }),
+      );
 
       // MCP віддає результат як content-блоки; текст із JSON читається моделлю нормально.
       return void ok({ content: [{ type: 'text', text: JSON.stringify(data) }], isError: false });

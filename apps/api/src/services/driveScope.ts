@@ -1,5 +1,5 @@
 import { prisma } from '@platform/db';
-import { findFolderByName, isFileInFolder } from '@platform/drive';
+import { findFolderByName, isFileInFolder, runAsUser } from '@platform/drive';
 
 /**
  * Область роботи асистента з Диском клієнта — єдине джерело правди для MCP і REST.
@@ -19,6 +19,8 @@ export interface DriveScope {
   writeFolderId: string | null;
   /** Дозволені підтеки під текою запису (префікси назв). Порожньо = вся тека запису. */
   writableFolders: string[];
+  /** Від імені кого діяти на Диску клієнта (delegation). Порожньо = звичайний сервіс-акаунт. */
+  impersonateUser: string | null;
 }
 
 /**
@@ -30,14 +32,32 @@ export const SUGGESTED_WRITABLE_FOLDERS = ['02_', '03_', '04_', '05_'];
 export async function loadDriveScope(companyId: string): Promise<DriveScope> {
   const company = await prisma.company.findUnique({
     where: { id: companyId },
-    select: { driveScanFolderId: true, driveWriteFolderId: true, driveWritableFolders: true },
+    select: {
+      driveScanFolderId: true,
+      driveWriteFolderId: true,
+      driveWritableFolders: true,
+      googleImpersonateUser: true,
+    },
   });
   if (!company) throw new Error('Компанію не знайдено');
   return {
     scanFolderId: company.driveScanFolderId ?? undefined,
     writeFolderId: company.driveWriteFolderId,
     writableFolders: company.driveWritableFolders ?? [],
+    impersonateUser: company.googleImpersonateUser,
   };
+}
+
+/**
+ * Виконати роботу з Диском у контексті компанії.
+ *
+ * Делегування налаштовується на кожного клієнта окремо, тому не можна просто
+ * увімкнути його глобально: інакше запити однієї компанії йшли б від імені
+ * власника іншої.
+ */
+export async function withCompanyDrive<T>(companyId: string, fn: (scope: DriveScope) => Promise<T>): Promise<T> {
+  const scope = await loadDriveScope(companyId);
+  return runAsUser(scope.impersonateUser, () => fn(scope));
 }
 
 /**

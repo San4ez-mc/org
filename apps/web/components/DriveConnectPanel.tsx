@@ -15,7 +15,7 @@ const btn: React.CSSProperties = {
 };
 const secBtn: React.CSSProperties = { ...btn, background: 'transparent', color: 'hsl(var(--muted-foreground))' };
 
-export default function DriveConnectPanel({ companyId, driveRootFolderId, connectionInfo = null }: { companyId: string; driveRootFolderId: string | null; connectionInfo?: DriveConnectionInfo | null }) {
+export default function DriveConnectPanel({ companyId, driveRootFolderId, connectionInfo = null, impersonateUser = null }: { companyId: string; driveRootFolderId: string | null; connectionInfo?: DriveConnectionInfo | null; impersonateUser?: string | null }) {
   const [connected, setConnected] = useState<string | null>(driveRootFolderId);
   const [input, setInput] = useState('');
   const [index, setIndex] = useState(true);
@@ -72,6 +72,8 @@ export default function DriveConnectPanel({ companyId, driveRootFolderId, connec
           onFolderInput={setInput}
           onConnect={doConnect}
           pending={pending && phase === 'connecting'}
+          companyId={companyId}
+          impersonateUser={impersonateUser}
         />
       ) : (
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>

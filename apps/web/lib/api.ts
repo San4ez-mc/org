@@ -11,6 +11,8 @@ export interface Company {
   driveScanFolderId?: string | null;
   driveWriteFolderId?: string | null;
   driveWritableFolders?: string[];
+  /** Пошта, від імені якої працюємо на Диску клієнта (domain-wide delegation). */
+  googleImpersonateUser?: string | null;
   driveExcludedIds?: string[];
   driveIndexedAt?: string | null;
   driveIndexedCount?: number;

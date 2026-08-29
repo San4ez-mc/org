@@ -31,7 +31,12 @@ export default async function CompanyFolder({ params }: { params: { id: string }
       <a href={`/company/${company.id}`} style={{ display: 'inline-block', margin: '4px 0 12px', fontSize: 13, color: 'hsl(var(--primary))', textDecoration: 'none' }}>
         ← Повернутись до плану
       </a>
-      <DriveConnectPanel companyId={company.id} driveRootFolderId={company.driveRootFolderId} connectionInfo={connInfo} />
+      <DriveConnectPanel
+        companyId={company.id}
+        driveRootFolderId={company.driveRootFolderId}
+        connectionInfo={connInfo}
+        impersonateUser={company.googleImpersonateUser ?? null}
+      />
       <AssistantScopePanel
         companyId={company.id}
         scanFolderId={company.driveScanFolderId ?? null}

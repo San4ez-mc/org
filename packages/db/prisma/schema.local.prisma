@@ -10,7 +10,6 @@ generator client {
 datasource db {
   provider   = "postgresql"
   url        = env("DATABASE_URL")
-  extensions = [vector]
 }
 
 // ── Перелічення ───────────────────────────────────────────
@@ -62,23 +61,15 @@ model Company {
   id                String   @id @default(uuid())
   name              String
   abbr              String? // скорочення-префікс (напр. "LB")
-  driveRootFolderId String? // корінь папок компанії на Drive клієнта (структура, індексація)
-  // Область роботи асистента. Читання і запис розчеплені навмисно: клієнт може відкрити
-  // боту весь диск для пошуку, але тримати запис у межах однієї теки.
-  driveScanFolderId    String? // що асистент читає й шукає; порожньо = весь диск клієнта
-  driveWriteFolderId   String? // ЄДИНА тека, куди асистенту дозволено писати; порожньо = запис заборонено
-  driveWritableFolders String[] @default([]) // дозволені підтеки під текою запису (префікси назв); порожньо = вся тека
-  googleImpersonateUser String? // domain-wide delegation: від імені кого діємо на Диску клієнта; порожньо = звичайний сервіс-акаунт
+  driveRootFolderId String? // корінь папок компанії на Drive клієнта
   driveExcludedIds  String[] @default([]) // #302 id тек/файлів Drive, виключені з індексації
   driveIndexedAt    DateTime? // #303 час останньої успішної індексації папки у вектор
   driveIndexedCount Int       @default(0) // #303 к-ть проіндексованих файлів
   vectorProjectId   String? // #306 власний проєкт компанії у vector-базі
-  vectorToken       String? // #306 root-токен цього проєкту (для індексації/пошуку/під-токенів)
+  vectorToken       String? // #306 root-токен цього проєкту
   driveInstructionsFolderId String? // #310 (3d) тека на Drive, куди система пише посадові інструкції
-  structureProposal Json?   // #311 (3e) чернетка запропонованої ШІ структури папок (tree + описи + moves)
+  structureProposal Json?   // #311 (3e) чернетка запропонованої ШІ структури папок
   orgSheetId        String? // Google Sheet з оргсхемою
-  assistantMemory   AssistantMemory[]
-  crmSheetId        String? // CRM-таблиця асистента (Digital Hiring); id тримаємо тут, щоб модель його не бачила
   googleAccountId   String? // прив'язаний OAuth Google-акаунт (для Drive/Sheets/Docs)
 
   // #213 Стратегічний шар
@@ -204,11 +195,6 @@ model Member {
   role             MemberRole @default(EMPLOYEE)
   accessToken      String?    @unique // особисте посилання входу до порталу працівника
 
-  // Звʼязок із користувачем SSO. Одна людина може працювати в кількох компаніях —
-  // тоді це кілька Member з тим самим ssoUserId, тому унікальність лише в межах компанії.
-  // Ставиться явно: спільного ключа з SSO (email) у даних немає.
-  ssoUserId        String?
-
   // Життєвий цикл працівника (#211)
   hireDate         DateTime?    // дата прийому
   status           MemberStatus @default(EMPLOYED)
@@ -221,8 +207,6 @@ model Member {
   botLinks BotLink[]
 
   @@unique([companyId, telegramUserId])
-  @@unique([companyId, ssoUserId])
-  @@index([ssoUserId])
   @@index([companyId])
 }
 
@@ -330,7 +314,7 @@ model InstructionEmbedding {
   content       String
   driveDocId    String?
   // vector(768) під Vertex text-embedding-004; запити схожості — raw SQL
-  embedding     Unsupported("vector(768)")?
+  // (embedding-колонка прибрана для локального Postgres без pgvector)
 
   updatedAt DateTime @updatedAt
 
@@ -487,7 +471,7 @@ model KnowledgeChunk {
   driveFileId String?
   chunkNo     Int
   content     String
-  embedding   Unsupported("vector(768)")?
+  // (embedding-колонка прибрана для локального Postgres без pgvector)
   updatedAt   DateTime                    @updatedAt
 
   @@index([driveFileId])
@@ -511,18 +495,4 @@ model Proposal {
 
   @@index([companyId, status])
   @@index([targetInstructionId])
-}
-
-// Довга памʼять асистента: стійкі факти, що переживають сесію.
-// Тримаємо в БД як джерело правди, а у вектор індексуємо копію — щоб можна було
-// спитати «що ми вирішували по клієнту N» і знайти змістом, а не гортанням.
-model AssistantMemory {
-  id        String   @id @default(uuid())
-  companyId String
-  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  text      String
-  tag       String?  // напр. «клієнт», «домовленість», «заборона»
-  createdAt DateTime @default(now())
-
-  @@index([companyId, createdAt])
 }

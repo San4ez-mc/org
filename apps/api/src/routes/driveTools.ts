@@ -8,7 +8,7 @@ import {
   appendSheetValues,
   connectionInfo,
 } from '@platform/drive';
-import { loadDriveScope, resolveWriteTarget, assertFileWritable } from '../services/driveScope';
+import { loadDriveScope, resolveWriteTarget, assertFileWritable, withCompanyDrive } from '../services/driveScope';
 
 /**
  * Інструменти асистента над Drive/Sheets (ТЗ Digital Hiring §0.1, §4).
@@ -87,8 +87,9 @@ driveTools.post(
     const query = need(req, 'query');
     const limit = Number(param(req, 'limit')) || 20;
     // Область читання — з картки компанії, а не з аргумента: інакше викликач сам вирішував би, що йому видно.
-    const scope = await loadDriveScope(need(req, 'companyId'));
-    const files = await searchFiles(query, scope.scanFolderId, limit);
+    const files = await withCompanyDrive(need(req, 'companyId'), (scope) =>
+      searchFiles(query, scope.scanFolderId, limit),
+    );
     res.json({ count: files.length, files });
   }),
 );
@@ -116,13 +117,12 @@ driveTools.post(
     const content = String(param(req, 'content') ?? '');
     const fileId = param(req, 'fileId') ? String(param(req, 'fileId')).trim() : undefined;
 
-    const scope = await loadDriveScope(companyId);
-    const folderId = await resolveWriteTarget(scope, folder);
-
-    // id прийшов ззовні — інакше через нього можна було б записати в будь-який файл на диску.
-    if (fileId) await assertFileWritable(folderId, fileId);
-
-    const result = await writeFile(folderId, filename, content, fileId);
+    const result = await withCompanyDrive(companyId, async (scope) => {
+      const folderId = await resolveWriteTarget(scope, folder);
+      // id прийшов ззовні — інакше через нього можна було б записати в будь-який файл на диску.
+      if (fileId) await assertFileWritable(folderId, fileId);
+      return writeFile(folderId, filename, content, fileId);
+    });
     res.json({ ...result, folder, filename });
   }),
 );

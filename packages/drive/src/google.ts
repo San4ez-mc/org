@@ -1,4 +1,5 @@
 import { readFileSync, existsSync } from 'node:fs';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { google } from 'googleapis';
 import type { OAuth2Client } from 'google-auth-library';
 
@@ -41,13 +42,40 @@ function readRefreshToken(): string | null {
   return null;
 }
 
-/** Повертає авторизований клієнт: OAuth якщо є refresh token, інакше сервіс-акаунт. */
+/**
+ * Від імені кого працюємо в межах одного запиту.
+ *
+ * Делегування налаштовується на КОЖНОГО клієнта окремо, тож глобальна змінна
+ * середовища тут не годиться: другий клієнт ламав би першого. Передавати subject
+ * аргументом у кожну функцію пакета означало б правку десятків сигнатур, тому тримаємо
+ * його в контексті асинхронного виконання.
+ */
+const driveContext = new AsyncLocalStorage<{ subject?: string }>();
+
+/** Виконати блок від імені користувача клієнта. Порожній subject — звичайна поведінка. */
+export function runAsUser<T>(subject: string | null | undefined, fn: () => Promise<T>): Promise<T> {
+  const s = subject?.trim();
+  return s ? driveContext.run({ subject: s }, fn) : fn();
+}
+
+/** Контекст запиту має пріоритет; змінна середовища — запасний шлях для скриптів. */
+function activeSubject(): string | undefined {
+  return driveContext.getStore()?.subject || process.env.GOOGLE_IMPERSONATE_USER?.trim() || undefined;
+}
+
+/** Повертає авторизований клієнт: делегування → OAuth → сервіс-акаунт. */
 export function getAuth(): OAuth2Client | InstanceType<typeof google.auth.GoogleAuth> {
-  const refreshToken = readRefreshToken();
-  if (refreshToken) {
-    const oauth = makeOAuthClient();
-    oauth.setCredentials({ refresh_token: refreshToken });
-    return oauth;
+  const subject = activeSubject();
+
+  // Коли діємо від імені клієнта, OAuth-гілка вимкнена свідомо: там ми б діяли
+  // від імені акаунта FINEKO, а не власника диска — і файли лягали б не туди.
+  if (!subject) {
+    const refreshToken = readRefreshToken();
+    if (refreshToken) {
+      const oauth = makeOAuthClient();
+      oauth.setCredentials({ refresh_token: refreshToken });
+      return oauth;
+    }
   }
 
   const keyPath = process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
@@ -56,21 +84,16 @@ export function getAuth(): OAuth2Client | InstanceType<typeof google.auth.Google
   }
   const credentials = JSON.parse(readFileSync(keyPath, 'utf8'));
 
-  // Domain-wide delegation: сервіс-акаунт діє від імені користувача домену, тож
-  // працює його квота і його «Мій диск». Вмикається лише коли адміністратор Workspace
-  // видав дозвіл і в конфізі вказано, за кого діяти — без цієї змінної поведінка стара.
-  const subject = process.env.GOOGLE_IMPERSONATE_USER?.trim();
   if (subject) {
     return new google.auth.GoogleAuth({ credentials, scopes: SCOPES, clientOptions: { subject } });
   }
-
   return new google.auth.GoogleAuth({ credentials, scopes: SCOPES });
 }
 
 /** Який спосіб авторизації активний зараз (для діагностики). */
 export function authMode(): 'oauth' | 'service_account' | 'domain_delegation' {
-  if (readRefreshToken()) return 'oauth';
-  return process.env.GOOGLE_IMPERSONATE_USER?.trim() ? 'domain_delegation' : 'service_account';
+  if (activeSubject()) return 'domain_delegation';
+  return readRefreshToken() ? 'oauth' : 'service_account';
 }
 
 export function getDrive() {
@@ -99,13 +122,18 @@ export const SHARED_DRIVE_PARAMS = {
 export function connectionInfo(): {
   mode: ReturnType<typeof authMode>;
   serviceAccountEmail: string | null;
+  /** Числовий Client ID сервiс-акаунта: саме його вставляють в Admin Console при делегуваннi. */
+  serviceAccountClientId: string | null;
   oauthClientId: string | null;
 } {
   let serviceAccountEmail: string | null = null;
+  let serviceAccountClientId: string | null = null;
   const keyPath = process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
   if (keyPath && existsSync(keyPath)) {
     try {
-      serviceAccountEmail = JSON.parse(readFileSync(keyPath, 'utf8')).client_email ?? null;
+      const key = JSON.parse(readFileSync(keyPath, 'utf8'));
+      serviceAccountEmail = key.client_email ?? null;
+      serviceAccountClientId = key.client_id ?? null;
     } catch {
       serviceAccountEmail = null;
     }
@@ -113,6 +141,7 @@ export function connectionInfo(): {
   return {
     mode: authMode(),
     serviceAccountEmail,
+    serviceAccountClientId,
     oauthClientId: process.env.GOOGLE_OAUTH_CLIENT_ID ?? null,
   };
 }

@@ -134,7 +134,7 @@ api.get('/companies/:id', async (req, res) => {
 api.patch('/companies/:id', async (req, res) => {
   try {
     const { name, abbr, mission, companyCkp, idealPicture, parentCompanyId, driveRootFolderId, orgSheetId, adizesStage,
-      driveScanFolderId, driveWriteFolderId, driveWritableFolders } = req.body ?? {};
+      driveScanFolderId, driveWriteFolderId, driveWritableFolders, googleImpersonateUser } = req.body ?? {};
     const company = await prisma.company.update({
       where: { id: req.params.id },
       data: {
@@ -149,6 +149,7 @@ api.patch('/companies/:id', async (req, res) => {
         // Області асистента: порожнє сканування = весь диск, порожній запис = запис вимкнено.
         ...(driveScanFolderId !== undefined && { driveScanFolderId: driveScanFolderId || null }),
         ...(driveWriteFolderId !== undefined && { driveWriteFolderId: driveWriteFolderId || null }),
+        ...(googleImpersonateUser !== undefined && { googleImpersonateUser: googleImpersonateUser || null }),
         ...(Array.isArray(driveWritableFolders) && {
           driveWritableFolders: driveWritableFolders.map((x: unknown) => String(x).trim()).filter(Boolean),
         }),
