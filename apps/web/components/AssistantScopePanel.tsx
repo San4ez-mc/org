@@ -1,6 +1,6 @@
 'use client';
 import { useState, useTransition } from 'react';
-import { saveAssistantScope } from '@/app/company/[id]/actions';
+import { createDriveWriteFolder, saveAssistantScope } from '@/app/company/[id]/actions';
 
 const card: React.CSSProperties = {
   background: 'hsl(var(--card))', border: '1px solid hsl(var(--border))',
@@ -27,9 +27,10 @@ const hint: React.CSSProperties = { fontSize: 12, color: 'hsl(var(--muted-foregr
  * його вже нічим не обмежує — межу тримає сервер за цими полями.
  */
 export default function AssistantScopePanel({
-  companyId, scanFolderId, writeFolderId, writableFolders,
+  companyId, companyName, scanFolderId, writeFolderId, writableFolders,
 }: {
   companyId: string;
+  companyName?: string;
   scanFolderId: string | null;
   writeFolderId: string | null;
   writableFolders: string[];
@@ -37,9 +38,14 @@ export default function AssistantScopePanel({
   const [scan, setScan] = useState(scanFolderId ?? '');
   const [write, setWrite] = useState(writeFolderId ?? '');
   const [folders, setFolders] = useState((writableFolders ?? []).join(', '));
+  const [newName, setNewName] = useState(`${companyName ?? 'Компанія'} — структура`);
+  const [createdUrl, setCreatedUrl] = useState('');
   const [saved, setSaved] = useState(false);
   const [err, setErr] = useState('');
   const [pending, start] = useTransition();
+  // Окремий перехід під створення теки — інакше кнопка «Зберегти» блимала б «Зберігаю…»
+  // тоді, коли насправді створюється тека.
+  const [creating, startCreate] = useTransition();
 
   function save() {
     setErr(''); setSaved(false);
@@ -51,6 +57,19 @@ export default function AssistantScopePanel({
           writableFolders: folders.split(',').map((s) => s.trim()).filter(Boolean),
         });
         setSaved(true);
+      } catch (e) { setErr((e as Error).message); }
+    });
+  }
+
+  function createWriteFolder() {
+    setErr(''); setSaved(false); setCreatedUrl('');
+    startCreate(async () => {
+      try {
+        const r = await createDriveWriteFolder(companyId, newName);
+        // Підставляємо id одразу: інакше людина натисне «Створити» і побачить порожнє
+        // поле, ніби нічого не сталося, — і піде шукати теку руками.
+        setWrite(r.folderId);
+        setCreatedUrl(r.url);
       } catch (e) { setErr((e as Error).message); }
     });
   }
@@ -82,7 +101,22 @@ export default function AssistantScopePanel({
           <p style={hint}>
             {write.trim()
               ? 'Створювати й змінювати файли бот може лише тут.'
-              : 'Порожньо — запис вимкнений, бот працює лише на читання.'}
+              : 'Порожньо — запис вимкнений, бот працює лише на читання. Створення структури папок не спрацює, поки тека не вказана.'}
+          </p>
+
+          {/* Теку зручніше створити звідси, ніж шукати руками на диску клієнта. */}
+          <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
+            <input style={{ ...input, flex: '1 1 220px', width: 'auto' }} value={newName}
+              onChange={(e) => setNewName(e.target.value)} placeholder="Назва нової теки" />
+            <button style={btn} onClick={createWriteFolder} disabled={creating || !newName.trim()}>
+              {creating ? 'Створюю…' : 'Створити теку для запису'}
+            </button>
+          </div>
+          <p style={hint}>
+            {createdUrl
+              ? <>✅ Теку створено й одразу записано в налаштування компанії. {' '}
+                <a href={createdUrl} target="_blank" rel="noreferrer" style={{ color: 'hsl(var(--primary))' }}>Відкрити теку ↗</a></>
+              : 'Тека створиться в корені підключеної папки клієнта й одразу стане текою запису.'}
           </p>
         </div>
 

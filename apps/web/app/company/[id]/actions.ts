@@ -27,7 +27,12 @@ async function call(path: string, method: string, body?: unknown) {
     body: body ? JSON.stringify(body) : undefined,
     cache: 'no-store',
   });
-  if (!res.ok) throw new Error(`${path} → ${res.status}`);
+  if (!res.ok) {
+    // Панелі показують саме .message, а «…/apply-structure → 400» не каже, що робити.
+    // Тому пояснення від API (напр. «спершу вкажіть теку для запису») тягнемо в текст помилки.
+    const body = (await res.json().catch(() => null)) as { error?: string; hint?: string } | null;
+    throw new Error(body?.hint || body?.error || `${path} → ${res.status}`);
+  }
   return res.json().catch(() => ({}));
 }
 
@@ -195,6 +200,20 @@ export async function saveAssistantScope(companyId: string, scope: {
   await call(`/companies/${companyId}`, 'PATCH', body);
   revalidatePath(`/company/${companyId}/folder`);
   return body as AssistantScope;
+}
+
+/**
+ * Створити виділену теку для запису на диску клієнта.
+ *
+ * Окрема дія, а не автостворення при збереженні: це єдина тека, яку платформа
+ * кладе в корінь чужого диска, і робити це має людина усвідомлено.
+ */
+export async function createDriveWriteFolder(companyId: string, name: string): Promise<{ folderId: string; name: string; url: string }> {
+  const clean = name.trim();
+  if (!clean) throw new Error('Вкажи назву теки');
+  const r = await call(`/companies/${companyId}/drive-write-folder`, 'POST', { name: clean, author: 'пульт' });
+  revalidatePath(`/company/${companyId}/folder`);
+  return r as { folderId: string; name: string; url: string };
 }
 
 /** #302 Легке дерево Диску (лише метадані) + список виключених id. Для сторінки «Папка». */

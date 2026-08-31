@@ -39,6 +39,7 @@ export default async function CompanyFolder({ params }: { params: { id: string }
       />
       <AssistantScopePanel
         companyId={company.id}
+        companyName={company.name}
         scanFolderId={company.driveScanFolderId ?? null}
         writeFolderId={company.driveWriteFolderId ?? null}
         writableFolders={company.driveWritableFolders ?? []}

@@ -1,7 +1,7 @@
-import { Router } from 'express';
+import { Router, type Response } from 'express';
 import { randomBytes } from 'crypto';
 import { prisma } from '@platform/db';
-import { findFolderByName, listFolderTree, listFolderFiles, readFileText, ensureFolder, type DriveNode } from '@platform/drive';
+import { findFolderByName, listFolderTree, listFolderFiles, readFileText, ensureFolder, driveFolderUrl, type DriveNode } from '@platform/drive';
 import { stepsToMermaid } from '@platform/ai';
 import { requireApiSecret } from '../middleware/auth';
 import { handleAct } from '../services/agent';
@@ -10,6 +10,7 @@ import { startDriveIndex, getIndexProgress } from '../services/driveIndexer';
 import { driveTools } from './driveTools';
 import { agentTools } from './agentTools';
 import { companyDriveContext, forgetCompanyDriveContext } from '../middleware/companyDriveContext';
+import { CANONICAL_DIVISIONS } from '@platform/org-template';
 
 /**
  * Контракт API платформи (§8 PLAN_PHASE1.md).
@@ -1915,7 +1916,7 @@ const STRUCTURE_TEMPLATE = `Канонічний шаблон (7 відділе�
 3. Фінансове відділення: Бухгалтерія; Управлінська звітність.
 4. Технічне відділення: посадові папки за напрямами.
 5. Відділення кваліфікації: Відділ якості; Навчання персоналу.
-6. Відділення роботи з публікою: Зв'язок з суспільством; Робота з партнерами.
+6. Відділення по роботі з публікою: Зв'язок з суспільством; Робота з партнерами.
 7. Адміністративне відділення: Власник, Директор, Помічник.
 Кожна ПОСАДА = окрема тека: <Посада>/{Посадові інструкції, Доступні документи, Доступи(Таблиця), Звітність(Таблиця)}.
 Наскрізні: «Опис документів та доступи»(Таблиця); «Спільні документи»(Бренд/айдентика, Політики компанії, Стратегія-історія); «Список працівників»(Таблиця).`;
@@ -1968,13 +1969,62 @@ api.patch('/companies/:id/structure-proposal', async (req, res) => {
   } catch (err) { res.status(500).json({ error: String(err) }); }
 });
 
+/**
+ * Тека, у якій платформі дозволено СТВОРЮВАТИ теки й документи.
+ *
+ * Навіщо окремо від driveRootFolderId: корінь — це область читання та індексації, і
+ * при делегуванні він дорівнює всьому «Моєму диску» клієнта (`root`). Створення від
+ * кореня висипало б наші теки поверх робочих файлів клієнта, тоді як домовленість —
+ * писати лише в одну виділену теку.
+ *
+ * Мовчазного фолбеку на корінь тут немає навмисно: непомітний фолбек саме й перетворює
+ * забуте налаштування на зміни на чужому диску. Краще зупинитись із поясненням.
+ */
+async function requireWriteFolder(companyId: string, res: Response): Promise<string | null> {
+  const c = await prisma.company.findUnique({ where: { id: companyId }, select: { driveWriteFolderId: true } });
+  const id = (c?.driveWriteFolderId ?? '').trim();
+  // `root` — псевдонім усього диска, тобто протилежність «однієї виділеної теки».
+  if (!id || id.toLowerCase() === 'root') {
+    res.status(400).json({
+      error: 'no-write-folder',
+      hint: 'Спершу вкажіть теку для запису: сторінка «Папка» → «Що дозволено асистенту» → «Створити теку для запису».',
+    });
+    return null;
+  }
+  return id;
+}
+
+/**
+ * Створити виділену теку для запису й запамʼятати її в компанії.
+ *
+ * Це єдине місце, де тека свідомо створюється в корені диска клієнта — і робить це
+ * людина руками, одним явним натисканням. Уся подальша автоматика пише вже тільки
+ * всередину цієї теки.
+ */
+api.post('/companies/:id/drive-write-folder', async (req, res) => {
+  try {
+    const name = String(req.body?.name ?? '').trim().slice(0, 120);
+    if (!name) return void res.status(400).json({ error: 'name обовʼязкове' });
+    const c = await prisma.company.findUnique({ where: { id: req.params.id }, select: { driveRootFolderId: true } });
+    if (!c) return void res.status(404).json({ error: 'company-not-found' });
+    const parentId = c.driveRootFolderId || 'root';
+    const folderId = await ensureFolder(parentId, name); // ідемпотентно: повторне натискання не плодить дублів
+    await prisma.company.update({ where: { id: req.params.id }, data: { driveWriteFolderId: folderId } });
+    await logChange(req.params.id, 'structure', 'update', `Створено теку для запису: ${name}`, req.body?.author);
+    res.json({ folderId, name, url: driveFolderUrl(folderId) });
+  } catch (err) { res.status(500).json({ error: String(err) }); }
+});
+
 // #311 (3e-3, безпечна частина) Застосувати структуру = СТВОРИТИ теки на Диску (ensureFolder, ідемпотентно).
 // НЕ переміщує наявні файли (це ризикована окрема фаза). Лог створеного — для відкату.
 api.post('/companies/:id/apply-structure', async (req, res) => {
   try {
-    const c = await prisma.company.findUnique({ where: { id: req.params.id }, select: { driveRootFolderId: true, structureProposal: true } });
-    if (!c?.driveRootFolderId) return void res.status(400).json({ error: 'no-drive-folder' });
-    const proposal = c.structureProposal as any;
+    // Структуру розгортаємо в теці ЗАПИСУ, а не в корені: інакше 7 відділень лягли б
+    // поверх наявних файлів клієнта в «Моєму диску».
+    const writeRoot = await requireWriteFolder(req.params.id, res);
+    if (!writeRoot) return;
+    const c = await prisma.company.findUnique({ where: { id: req.params.id }, select: { structureProposal: true } });
+    const proposal = c?.structureProposal as any;
     if (!proposal?.structure?.length) return void res.status(400).json({ error: 'no-proposal' });
 
     const created: { name: string; path: string; id: string }[] = [];
@@ -1987,7 +2037,7 @@ api.post('/companies/:id/apply-structure', async (req, res) => {
         if (Array.isArray(n.children) && n.children.length) await walk(n.children, id, p);
       }
     };
-    await walk(proposal.structure, c.driveRootFolderId, '');
+    await walk(proposal.structure, writeRoot, '');
 
     const applyLog = { appliedAt: new Date().toISOString(), createdCount: created.length, created };
     await prisma.company.update({ where: { id: req.params.id }, data: { structureProposal: { ...proposal, applyLog } } });
@@ -2019,11 +2069,13 @@ api.get('/companies/:id/instructions-folder', async (req, res) => {
 // #310 (3d) Встановити папку для інструкцій (обрати наявну або створити нову під коренем).
 api.post('/companies/:id/instructions-folder', async (req, res) => {
   try {
-    const c = await prisma.company.findUnique({ where: { id: req.params.id }, select: { driveRootFolderId: true } });
-    if (!c?.driveRootFolderId) return void res.status(400).json({ error: 'no-drive-folder' });
     let folderId = String(req.body?.folderId || '');
+    // Вибір наявної теки нічого не створює, тому теки запису не потребує — вимагаємо її
+    // лише на гілці створення.
     if (!folderId && req.body?.create) {
-      folderId = await ensureFolder(c.driveRootFolderId, String(req.body?.name || 'Посадові інструкції').slice(0, 100));
+      const writeRoot = await requireWriteFolder(req.params.id, res);
+      if (!writeRoot) return;
+      folderId = await ensureFolder(writeRoot, String(req.body?.name || 'Посадові інструкції').slice(0, 100));
     }
     if (!folderId) return void res.status(400).json({ error: 'folderId або create обовʼязкове' });
     await prisma.company.update({ where: { id: req.params.id }, data: { driveInstructionsFolderId: folderId } });
@@ -2033,12 +2085,17 @@ api.post('/companies/:id/instructions-folder', async (req, res) => {
 
 // #310 (3d) Створити ЦЕНТРАЛЬНУ папку інструкцій: «1. Відділення побудови» → «Посадові інструкції»
 // → 7 департаментів. Сюди пишуться всі інструкції, звідси — ярлики в посадові папки працівників.
-const DIVISIONS_7 = ['1. Відділення побудови', '2. Відділення поширення', '3. Фінансове відділення', '4. Технічне відділення', '5. Відділення кваліфікації', '6. Відділення роботи з публікою', '7. Адміністративне відділення'];
+// Назви не дублюємо, а виводимо з канонічного шаблону: раніше цей список жив своїм
+// життям і встиг розійтися з canonical.ts («роботи з публікою» проти «по роботі з
+// публікою»), а обидва шляхи створюють теки на Диску — виходили б дублі.
+const DIVISIONS_7 = [...CANONICAL_DIVISIONS]
+  .sort((a, b) => a.boardNo - b.boardNo)
+  .map((d) => `${d.boardNo}. ${d.name}`);
 api.post('/companies/:id/instructions-folder/central', async (req, res) => {
   try {
-    const c = await prisma.company.findUnique({ where: { id: req.params.id }, select: { driveRootFolderId: true } });
-    if (!c?.driveRootFolderId) return void res.status(400).json({ error: 'no-drive-folder' });
-    const pobudova = await ensureFolder(c.driveRootFolderId, '1. Відділення побудови');
+    const writeRoot = await requireWriteFolder(req.params.id, res);
+    if (!writeRoot) return;
+    const pobudova = await ensureFolder(writeRoot, '1. Відділення побудови');
     const instr = await ensureFolder(pobudova, 'Посадові інструкції');
     for (const div of DIVISIONS_7) await ensureFolder(instr, div);
     await prisma.company.update({ where: { id: req.params.id }, data: { driveInstructionsFolderId: instr } });
