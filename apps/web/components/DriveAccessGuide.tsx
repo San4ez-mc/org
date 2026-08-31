@@ -298,10 +298,16 @@ export default function DriveAccessGuide({
                 <input
                   value={folderInput}
                   onChange={(e) => onFolderInput(e.target.value)}
-                  placeholder="drive.google.com/drive/folders/…"
+                  placeholder={m.id === 'delegation' ? 'root — увесь «Мій диск», або посилання на теку' : 'drive.google.com/drive/folders/…'}
                   style={input}
                   onKeyDown={(e) => e.key === 'Enter' && folderInput.trim() && onConnect()}
                 />
+                {m.id === 'delegation' && (
+                  <div style={{ fontSize: 11.5, color: 'hsl(var(--muted-foreground))', marginTop: 4 }}>
+                    Впишіть <code>root</code>, щоб сканувати весь «Мій диск» власника. Це потрібно лише
+                    для перегляду дерева й індексації — на те, куди можна писати, не впливає.
+                  </div>
+                )}
                 <button style={{ ...btn, marginTop: 10 }} onClick={onConnect} disabled={pending || !folderInput.trim()}>
                   {pending ? 'Підключаю…' : 'Підключити теку'}
                 </button>

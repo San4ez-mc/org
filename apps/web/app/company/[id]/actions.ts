@@ -129,6 +129,9 @@ export async function deleteStatistic(companyId: string, statisticId: string) {
 /** Витягти id теки з URL Google Drive або прийняти «сирий» id. */
 function extractFolderId(input: string): string | null {
   const s = input.trim();
+  // `root` — службовий псевдонім кореня «Мого диска» в Google Drive API. Потрібен для
+  // делегування: там теки-кореня немає, а сканувати треба весь диск власника.
+  if (s.toLowerCase() === 'root') return 'root';
   const m = s.match(/\/folders\/([a-zA-Z0-9_-]+)/) ?? s.match(/[?&]id=([a-zA-Z0-9_-]+)/);
   if (m) return m[1];
   if (/^[a-zA-Z0-9_-]{16,}$/.test(s)) return s; // схоже на «сирий» id
