@@ -9,6 +9,7 @@ import { indexInstruction, findRelatedInstructions, indexDriveDocuments, vectorE
 import { startDriveIndex, getIndexProgress } from '../services/driveIndexer';
 import { driveTools } from './driveTools';
 import { agentTools } from './agentTools';
+import { companyDriveContext, forgetCompanyDriveContext } from '../middleware/companyDriveContext';
 
 /**
  * Контракт API платформи (§8 PLAN_PHASE1.md).
@@ -20,6 +21,9 @@ export const api = Router();
 api.use(requireApiSecret);
 
 // Інструменти асистента над Drive/Sheets (Digital Hiring). Auth успадковується вище.
+// Делегування вмикається до будь-якого звернення до Диска: усе, що лежить під
+// /companies/:id, автоматично працює від імені власника диска цієї компанії.
+api.use('/companies/:id', companyDriveContext((req) => req.params.id));
 api.use('/drive', driveTools);
 
 // Інструменти бота над орг-структурою (читання, посади, теки).
@@ -156,6 +160,7 @@ api.patch('/companies/:id', async (req, res) => {
         ...(orgSheetId !== undefined && { orgSheetId: orgSheetId || null }),
       },
     });
+    if (googleImpersonateUser !== undefined) forgetCompanyDriveContext(company.id);
     await logChange(company.id, 'structure', 'update', 'Оновлено профіль/стратегію компанії', req.body?.author);
     res.json({ company });
   } catch (err) {

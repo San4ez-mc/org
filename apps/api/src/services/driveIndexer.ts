@@ -72,7 +72,10 @@ export function startDriveIndex(companyId: string, folderId: string, excludedIds
   const p: IndexProgress = { running: true, phase: 'listing', total: 0, processed: 0, indexed: 0, startedAt: Date.now(), finishedAt: null, error: null };
   progressMap.set(companyId, p);
 
-  // fire-and-forget: не блокуємо HTTP-відповідь
+  // fire-and-forget: не блокуємо HTTP-відповідь.
+  // Контекст компанії (від імені кого читаємо Диск) успадковується від обробника
+  // запиту через AsyncLocalStorage — асинхронна робота, породжена всередині нього,
+  // бачить той самий контекст навіть після того, як відповідь уже пішла.
   void (async () => {
     try {
       // #306 Власний vector-проєкт компанії (свій root-токен) — індексуємо саме в нього
