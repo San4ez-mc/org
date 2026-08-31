@@ -145,22 +145,34 @@ function DelegationPanel({
   return (
     <>
       <ol style={stepList}>
-        <li>Відкрийте <b>admin.google.com</b> під акаунтом адміністратора домену.</li>
-        <li>Меню → <b>Security</b> → <b>Access and data control</b> → <b>API controls</b>.</li>
-        <li>Внизу сторінки: <b>Manage Domain Wide Delegation</b> → <b>Add new</b>.</li>
-        <li>У поле <b>Client ID</b> вставте це:</li>
+        <li>
+          Увійдіть у Google під акаунтом <b>адміністратора вашого домену</b> і відкрийте
+          сторінку делегування напряму:{' '}
+          <a href="https://admin.google.com/ac/owl/domainwidedelegation" target="_blank" rel="noreferrer"
+            style={{ color: 'hsl(var(--primary))' }}>
+            admin.google.com/ac/owl/domainwidedelegation
+          </a>
+          <div style={{ fontSize: 12, color: 'hsl(var(--muted-foreground))', marginTop: 3 }}>
+            Меню шукати не треба. Якщо все ж хочете руками: ліворуч <b>Показати більше</b> →{' '}
+            <b>Безпека</b> → <b>Доступ і керування даними</b> → <b>Керування API</b> →{' '}
+            <b>Керувати делегуванням у межах домену</b>. Пункт «Безпека» прихований, поки не
+            натиснете «Показати більше» — саме тому його не видно одразу.
+          </div>
+        </li>
+        <li>Натисніть <b>Додати</b> (Add new).</li>
+        <li>У поле <b>Ідентифікатор клієнта</b> (Client ID) вставте це:</li>
       </ol>
       {clientId
         ? <CopyField value={clientId} hint="Це числовий ідентифікатор нашого технічного акаунта. Не переплутайте з поштовою адресою — Google прийме тільки цифри." />
         : <div style={note}>Сервер не віддав Client ID сервісного акаунта — напишіть нам, підкажемо.</div>}
 
-      <ol start={5} style={stepList}>
-        <li>У поле <b>OAuth scopes</b> вставте цей рядок цілком:</li>
+      <ol start={4} style={stepList}>
+        <li>У поле <b>Області дії OAuth</b> (OAuth scopes) вставте цей рядок цілком:</li>
       </ol>
       <CopyField value={DELEGATION_SCOPES} hint="Тільки Диск, Таблиці й Документи. Доступу до пошти тут немає." />
 
-      <ol start={6} style={stepList}>
-        <li>Натисніть <b>Authorize</b>.</li>
+      <ol start={5} style={stepList}>
+        <li>Натисніть <b>Авторизувати</b> (Authorize).</li>
         <li>Впишіть нижче пошту, від імені якої асистент працюватиме з Диском — це має бути реальний акаунт домену, а не аліас.</li>
       </ol>
 
