@@ -58,6 +58,106 @@ const notImplemented = (name: string) => (_: unknown, res: any) =>
 api.post('/bot/link/resolve', notImplemented('bot.link.resolve'));
 
 // Головний ендпойнт агента: приймає intent від бота-воронки
+/**
+ * Прив'язка Telegram-користувача до компанії.
+ *
+ * Бот у Telegram не знає, хто до нього прийшов. Власник генерує одноразовий код,
+ * дає клієнту посилання `t.me/<bot>?start=<код>` — і при першому /start бот
+ * дізнається компанію. Далі та сама людина впізнається за telegramId, код більше
+ * не потрібен.
+ *
+ * Модель BotLink була в схемі від початку, але ніде не використовувалась.
+ */
+api.post('/companies/:id/bot-link', async (req, res) => {
+  try {
+    const company = await prisma.company.findUnique({ where: { id: req.params.id }, select: { id: true, name: true } });
+    if (!company) return void res.status(404).json({ error: 'company not found' });
+
+    const code = randomBytes(9).toString('base64url');
+    const days = Number(req.body?.expiresInDays) || 30;
+    await prisma.botLink.create({
+      data: {
+        code,
+        companyId: company.id,
+        memberId: req.body?.memberId || null,
+        role: req.body?.role === 'OWNER' ? 'OWNER' : req.body?.role === 'HEAD' ? 'HEAD' : 'EMPLOYEE',
+        expiresAt: new Date(Date.now() + days * 24 * 3600 * 1000),
+      },
+    });
+
+    const bot = String(req.body?.botUsername || process.env.ORG_BOT_USERNAME || '').replace(/^@/, '');
+    res.json({
+      code,
+      company: company.name,
+      expiresInDays: days,
+      link: bot ? `https://t.me/${bot}?start=${code}` : null,
+    });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+/**
+ * Обміняти код на компанію і запам'ятати Telegram-користувача.
+ * Кличеться воронкою один раз, на `/start <код>`.
+ */
+api.post('/agent/bind', async (req, res) => {
+  try {
+    const code = String(req.body?.code || '').trim();
+    const telegramId = String(req.body?.telegramId || '').trim();
+    if (!code || !telegramId) return void res.status(400).json({ error: 'code і telegramId обовʼязкові' });
+
+    const link = await prisma.botLink.findUnique({
+      where: { code },
+      include: { company: { select: { id: true, name: true } } },
+    });
+    if (!link) return void res.status(404).json({ error: 'unknown-code' });
+    if (link.expiresAt && link.expiresAt < new Date()) return void res.status(410).json({ error: 'code-expired' });
+
+    // Людина стає Member компанії — так її наступного разу впізнаємо без коду.
+    const first = String(req.body?.firstName || '').trim() || 'Користувач';
+    const existing = await prisma.member.findFirst({ where: { companyId: link.companyId, telegramUserId: telegramId } });
+    const member = existing ?? await prisma.member.create({
+      data: {
+        companyId: link.companyId,
+        firstName: first,
+        lastName: String(req.body?.lastName || '').trim() || null,
+        telegramUserId: telegramId,
+        telegramUsername: String(req.body?.username || '').trim() || null,
+        role: link.role,
+      },
+    });
+
+    res.json({ companyId: link.companyId, company: link.company.name, memberId: member.id, role: link.role });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+/** Хто це — за Telegram-id. Для повторних заходів, коли коду вже немає. */
+api.get('/agent/whoami', async (req, res) => {
+  try {
+    const telegramId = String(req.query.telegramId || '').trim();
+    if (!telegramId) return void res.status(400).json({ error: 'telegramId обовʼязковий' });
+    const member = await prisma.member.findFirst({
+      where: { telegramUserId: telegramId },
+      select: { id: true, firstName: true, role: true, company: { select: { id: true, name: true } } },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (!member) return void res.json({ known: false });
+    res.json({
+      known: true,
+      companyId: member.company.id,
+      company: member.company.name,
+      memberId: member.id,
+      firstName: member.firstName,
+      role: member.role,
+    });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
 api.post('/agent/act', async (req, res) => {
   try {
     const intent = req.body?.intent;
