@@ -100,21 +100,29 @@ async function interviewDivisions(p: Params, ctx: AgentContext): Promise<AgentRe
         select: { id: true },
       });
       created++;
-      // Голова відділення (посада)
-      const leadName = ov ? S(ov.leadName) : '';
-      await prisma.orgUnit.create({
-        data: {
-          companyId, parentId: unit.id, type: 'POST', name: 'Голова відділення',
-          ckp: div.ckp, holderName: leadName || null, isVacant: !leadName,
-        },
-      });
-    } else if (ov && S(ov.leadName)) {
-      // Оновити голову існуючого відділення
+    }
+
+    // Посаду голови заводимо, ЛИШЕ коли названо людину. Порожня «Голова відділення»
+    // на кожне з семи відділень — це дев'ять фантомних вакансій і стільки ж порожніх
+    // чернеток інструкцій у компанії на трьох людей. Вакансії живуть в орг-структурі
+    // як факт «посади немає», а не як порожня картка.
+    const leadName = ov ? S(ov.leadName) : '';
+    if (leadName) {
+      const headName = `Голова відділення — ${div.name}`;
       const head = await prisma.orgUnit.findFirst({
-        where: { companyId, parentId: unit.id, type: 'POST', name: 'Голова відділення' },
+        where: { companyId, parentId: unit.id, type: 'POST', name: headName },
         select: { id: true },
       });
-      if (head) await prisma.orgUnit.update({ where: { id: head.id }, data: { holderName: S(ov.leadName), isVacant: false } });
+      if (head) {
+        await prisma.orgUnit.update({ where: { id: head.id }, data: { holderName: leadName, isVacant: false } });
+      } else {
+        await prisma.orgUnit.create({
+          data: {
+            companyId, parentId: unit.id, type: 'POST', name: headName,
+            ckp: (ov && S(ov.ckp)) || div.ckp, holderName: leadName, isVacant: false,
+          },
+        });
+      }
     }
   }
 
@@ -152,10 +160,17 @@ async function interviewDepartments(p: Params, ctx: AgentContext): Promise<Agent
       select: { id: true },
     });
     created++;
+
+    // Як і з головою відділення: посада керівника з'являється разом із людиною.
     const leadName = S(dp.leadName);
-    await prisma.orgUnit.create({
-      data: { companyId, parentId: dept.id, type: 'POST', name: 'Керівник відділу', ckp: S(dp.ckp) || null, holderName: leadName || null, isVacant: !leadName },
-    });
+    if (leadName) {
+      await prisma.orgUnit.create({
+        data: {
+          companyId, parentId: dept.id, type: 'POST', name: `Керівник відділу — ${deptName}`,
+          ckp: S(dp.ckp) || null, holderName: leadName, isVacant: false,
+        },
+      });
+    }
   }
 
   return {
