@@ -78,7 +78,6 @@ export interface CompanySkeleton {
   /** Контейнер папок працівників. */
   employeesRootId: string;
   orgSheetId: string;
-  staffSheetId: string;
   journalSheetId: string;
 }
 
@@ -132,10 +131,10 @@ export async function buildSkeletonInFolder(company: string): Promise<CompanySke
   const shared = await ensureFolder(company, SHARED);
   for (const name of SHARED_SUBFOLDERS) await ensureFolder(shared, name);
 
-  const staffSheet = await ensureSpreadsheet(company, 'Список працівників');
+  // «Список працівників» свідомо НЕ створюємо: люди й посади живуть в орг-системі,
+  // а копія на Диску одразу почала б розходитися з нею.
 
   await fillOrgSheet(orgSheet);
-  await writeSheetValues(staffSheet, [['Працівник', 'Google пошта', 'Посади', 'Статус', 'Дата найму']]);
   await writeSheetValues(journalSheet, [['Дата', 'Дія', 'Обʼєкт', 'Деталі', 'Хто']]);
 
   return {
@@ -145,7 +144,6 @@ export async function buildSkeletonInFolder(company: string): Promise<CompanySke
     hiringRootId: hiringRoot,
     employeesRootId: employeesRoot,
     orgSheetId: orgSheet,
-    staffSheetId: staffSheet,
     journalSheetId: journalSheet,
   };
 }
