@@ -1,7 +1,9 @@
 import { Router, type Response } from 'express';
 import { randomBytes } from 'crypto';
 import { prisma } from '@platform/db';
-import { findFolderByName, listFolderTree, listFolderFiles, readFileText, ensureFolder, driveFolderUrl, type DriveNode } from '@platform/drive';
+import { findFolderByName, listFolderTree, listFolderFiles, readFileText, ensureFolder, driveFolderUrl, type DriveNode,
+  buildSkeletonInFolder,
+} from '@platform/drive';
 import { stepsToMermaid } from '@platform/ai';
 import { requireApiSecret } from '../middleware/auth';
 import { handleAct } from '../services/agent';
@@ -2044,6 +2046,45 @@ api.post('/companies/:id/apply-structure', async (req, res) => {
     await prisma.changeLog.create({ data: { companyId: req.params.id, entity: 'structure', action: 'update', summary: `Застосовано структуру папок: створено/знайдено ${created.length} тек`, author: req.body?.author ?? 'система' } }).catch(() => {});
     res.json({ created: created.length, folders: created.slice(0, 100) });
   } catch (err) { res.status(500).json({ error: String(err) }); }
+});
+
+/**
+ * Розгорнути базовий скелет компанії у теці запису (ШАБЛОН_структури_папок.md §0).
+ *
+ * Створює ЛИШЕ каркас: 7 відділень, вузли для інструкцій та оргструктури, папки
+ * працівників, спільні документи. Відділи, посади й людей добудовує агент після
+ * інтерв'ю — наперед їх створювати нема з чого.
+ *
+ * Ідемпотентно: повторний виклик нічого не дублює.
+ */
+api.post('/companies/:id/build-structure', async (req, res) => {
+  try {
+    const c = await prisma.company.findUnique({
+      where: { id: req.params.id },
+      select: { name: true, driveWriteFolderId: true },
+    });
+    if (!c) return void res.status(404).json({ error: 'company not found' });
+    if (!c.driveWriteFolderId || c.driveWriteFolderId === 'root') {
+      return void res.status(400).json({
+        error: 'no-write-folder',
+        hint: 'Спершу створіть теку для запису — структура має лягти в неї, а не в корінь диска клієнта.',
+      });
+    }
+
+    const built = await buildSkeletonInFolder(c.driveWriteFolderId);
+    await prisma.changeLog.create({
+      data: {
+        companyId: req.params.id,
+        entity: 'structure',
+        action: 'update',
+        summary: `Розгорнуто базовий скелет папок у теці запису`,
+        author: req.body?.author ?? 'система',
+      },
+    }).catch(() => {});
+    res.json(built);
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
 });
 
 // #310 (3d) Папка для інструкцій: поточна + кандидати з дерева (завершення етапу «Папка»).

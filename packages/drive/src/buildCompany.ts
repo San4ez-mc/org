@@ -95,7 +95,15 @@ function divisionLabel(boardNo: number): string {
  * бо всі ensure* спершу шукають за назвою.
  */
 export async function buildCompanyStructure(rootId: string, companyName: string): Promise<CompanySkeleton> {
-  const company = await ensureFolder(rootId, companyName);
+  return buildSkeletonInFolder(await ensureFolder(rootId, companyName));
+}
+
+/**
+ * Той самий скелет, але у ВЖЕ наявній теці — коли її створив клієнт або платформа
+ * раніше. Без цього довелося б класти структуру в підтеку з назвою компанії,
+ * і виходило б «Digital Hiring — структура / Digital Hiring / 7 відділень».
+ */
+export async function buildSkeletonInFolder(company: string): Promise<CompanySkeleton> {
 
   // Сім відділень — каркас методології, однаковий для будь-якого бізнесу.
   // Відділи всередині них НЕ створюємо: вони залежать від інтерв'ю з клієнтом.

@@ -1,6 +1,6 @@
 'use client';
 import { useState, useTransition } from 'react';
-import { createDriveWriteFolder, saveAssistantScope } from '@/app/company/[id]/actions';
+import { buildCompanyFolders, createDriveWriteFolder, saveAssistantScope } from '@/app/company/[id]/actions';
 
 const card: React.CSSProperties = {
   background: 'hsl(var(--card))', border: '1px solid hsl(var(--border))',
@@ -46,6 +46,8 @@ export default function AssistantScopePanel({
   // Окремий перехід під створення теки — інакше кнопка «Зберегти» блимала б «Зберігаю…»
   // тоді, коли насправді створюється тека.
   const [creating, startCreate] = useTransition();
+  const [building, startBuild] = useTransition();
+  const [builtUrl, setBuiltUrl] = useState('');
 
   function save() {
     setErr(''); setSaved(false);
@@ -70,6 +72,16 @@ export default function AssistantScopePanel({
         // поле, ніби нічого не сталося, — і піде шукати теку руками.
         setWrite(r.folderId);
         setCreatedUrl(r.url);
+      } catch (e) { setErr((e as Error).message); }
+    });
+  }
+
+  function buildStructure() {
+    setErr(''); setBuiltUrl('');
+    startBuild(async () => {
+      try {
+        const r = await buildCompanyFolders(companyId);
+        setBuiltUrl(r.url);
       } catch (e) { setErr((e as Error).message); }
     });
   }
@@ -131,10 +143,19 @@ export default function AssistantScopePanel({
         </div>
       </div>
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 14 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 14, flexWrap: 'wrap' }}>
         <button style={btn} onClick={save} disabled={pending}>
           {pending ? 'Зберігаю…' : 'Зберегти'}
         </button>
+        <button style={btn} onClick={buildStructure} disabled={building || !write.trim()}
+          title={write.trim() ? '' : 'Спершу вкажіть теку для запису'}>
+          {building ? 'Створюю структуру…' : '🏗 Розгорнути базовий скелет'}
+        </button>
+        {builtUrl && (
+          <a href={builtUrl} target="_blank" rel="noreferrer" style={{ fontSize: 12.5, color: 'hsl(var(--primary))' }}>
+            ✅ Структуру створено — відкрити ↗
+          </a>
+        )}
         {saved && <span style={{ fontSize: 12.5, color: 'hsl(var(--primary))' }}>✅ Збережено</span>}
         {err && <span style={{ fontSize: 12.5, color: 'hsl(var(--destructive))' }}>{err}</span>}
       </div>

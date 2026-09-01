@@ -172,6 +172,13 @@ export async function saveGoogleDelegation(companyId: string, email: string): Pr
   return { email: value || null };
 }
 
+/** Розгорнути базовий скелет папок у теці запису компанії. */
+export async function buildCompanyFolders(companyId: string): Promise<{ url: string }> {
+  const r = await call(`/companies/${companyId}/build-structure`, 'POST', {});
+  revalidatePath(`/company/${companyId}/folder`);
+  return { url: r.url as string };
+}
+
 export interface AssistantScope {
   driveScanFolderId: string | null;
   driveWriteFolderId: string | null;
