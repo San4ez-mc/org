@@ -169,7 +169,11 @@ function splitLongBlock(block: string, size: number): string[] {
 
 /** Розбити текст документа на чанки по межах абзаців/рядків із перекриттям. */
 export function chunkText(text: string, size = CHUNK_SIZE, overlap = CHUNK_OVERLAP): string[] {
-  const clean = String(text || '').replace(/\r\n?/g, '\n').replace(/[ \t]+\n/g, '\n').trim();
+  const clean = String(text || '')
+    // NUL та інші керівні байти трапляються у витягах з .docx/.pdf; Postgres на
+    // боці вектора відбиває такий рядок, і разом з ним гине ВЕСЬ батч.
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, ' ')
+    .replace(/\r\n?/g, '\n').replace(/[ \t]+\n/g, '\n').trim();
   if (!clean) return [];
   if (clean.length <= size + overlap) return [clean];
 
@@ -234,14 +238,40 @@ export async function indexDriveDocuments(
     }));
   }
   let ingested = 0;
-  // Розмір батчу — у чанках, а не у файлах: інакше один великий файл давав би
-  // запит на сотні тисяч символів, який вектор-сервіс не витягує.
-  const BATCH = 48;
-  for (let i = 0; i < chunks.length; i += BATCH) {
-    const r = await call('/ingest', { collection: 'dynamic', chunks: chunks.slice(i, i + BATCH) }, token);
-    if (r && typeof r.ingested === 'number') ingested += r.ingested;
+  for (const slice of batchByBudget(chunks)) {
+    const r = await call('/ingest', { collection: 'dynamic', chunks: slice }, token);
+    if (r && typeof r.ingested === 'number') { ingested += r.ingested; continue; }
+    // Батч упав цілком — а падає він через ОДИН зіпсутий чанк (нечитабельний
+    // байт, аномальна довжина). Дотягуємо решту поштучно, щоб не втратити
+    // десятки нормальних фрагментів через один поганий.
+    if (slice.length === 1) continue;
+    for (const c of slice) {
+      const one = await call('/ingest', { collection: 'dynamic', chunks: [c] }, token);
+      if (one && typeof one.ingested === 'number') ingested += one.ingested;
+    }
   }
   return ingested;
+}
+
+/** Порізати чанки на запити до /ingest за бюджетом символів, а не за кількістю.
+ *  ЧОМУ: Vertex рахує ліміт (20k токенів) на ВЕСЬ запит, а не на елемент —
+ *  фіксована кількість чанків на щільному тексті вилітала за ліміт і вбивала
+ *  весь батч. Кирилиця ≈ 0.8 токена на символ, тож 14k символів ≈ 11k токенів. */
+function batchByBudget<T extends { content: string }>(chunks: T[]): T[][] {
+  const MAX_CHARS = 14_000;
+  const MAX_ITEMS = 20; // рівно стільки Vertex обробляє за один внутрішній виклик
+  const out: T[][] = [];
+  let cur: T[] = [];
+  let chars = 0;
+  for (const c of chunks) {
+    if (cur.length && (cur.length >= MAX_ITEMS || chars + c.content.length > MAX_CHARS)) {
+      out.push(cur); cur = []; chars = 0;
+    }
+    cur.push(c);
+    chars += c.content.length;
+  }
+  if (cur.length) out.push(cur);
+  return out;
 }
 
 /** #303 (3b) Проіндексувати текстовий опис ієрархії папок компанії (колекція static).
