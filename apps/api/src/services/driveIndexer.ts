@@ -3,7 +3,7 @@
 // тримає прогрес у пам'яті процесу (org-api — один pm2-процес). Стійко до відмов:
 // падіння окремого файлу не зупиняє індексацію.
 import { listFolderTree, readFileText, type DriveNode, type DriveFileInfo } from '@platform/drive';
-import { indexDriveDocuments, indexDriveStructure, createVectorProject, vectorEnabled } from './vector';
+import { indexDriveDocuments, indexDriveStructure, createVectorProject, vectorEnabled, deleteVectorChunks } from './vector';
 import { prisma } from '@platform/db';
 
 /** #306 Гарантувати власний vector-проєкт компанії; повертає її root-токен (або null). */
@@ -22,12 +22,14 @@ export interface IndexProgress {
   total: number;
   processed: number;
   indexed: number;
+  /** Скільки старих чанків знесено перед переіндексацією — діагностика дублікатів. */
+  deleted: number;
   startedAt: number | null;
   finishedAt: number | null;
   error: string | null;
 }
 
-const IDLE: IndexProgress = { running: false, phase: 'idle', total: 0, processed: 0, indexed: 0, startedAt: null, finishedAt: null, error: null };
+const IDLE: IndexProgress = { running: false, phase: 'idle', total: 0, processed: 0, indexed: 0, deleted: 0, startedAt: null, finishedAt: null, error: null };
 const progressMap = new Map<string, IndexProgress>();
 
 export function getIndexProgress(companyId: string): IndexProgress {
@@ -69,7 +71,7 @@ export function startDriveIndex(companyId: string, folderId: string, excludedIds
   if (cur?.running) return { started: false, reason: 'already-running' };
   if (!vectorEnabled()) return { started: false, reason: 'vector-disabled' };
 
-  const p: IndexProgress = { running: true, phase: 'listing', total: 0, processed: 0, indexed: 0, startedAt: Date.now(), finishedAt: null, error: null };
+  const p: IndexProgress = { running: true, phase: 'listing', total: 0, processed: 0, indexed: 0, deleted: 0, startedAt: Date.now(), finishedAt: null, error: null };
   progressMap.set(companyId, p);
 
   // fire-and-forget: не блокуємо HTTP-відповідь.
@@ -87,6 +89,15 @@ export function startDriveIndex(companyId: string, folderId: string, excludedIds
       const files = collectFiles(tree, excl, folderId);
       p.total = files.length;
       p.phase = 'reading';
+
+      // Ідемпотентність: кожен запуск — це повний перескан усього дерева, тож
+      // спершу зносимо стару видачу проєкту цілком. ЧОМУ не по source перед
+      // кожним файлом: source — це лише імʼя файлу без шляху, тож два однойменні
+      // файли з різних тек затирали б одне одного, а файли, видалені з Диску,
+      // лишались би в індексі назавжди. Чистимо після успішного лістингу дерева,
+      // щоб не лишитись із порожнім індексом, якщо Диск недоступний.
+      p.deleted = await deleteVectorChunks(token, 'dynamic');
+      await deleteVectorChunks(token, 'static', 'Структура папок компанії');
 
       const BATCH = 12;
       let batch: { source: string; content: string; driveFileId: string; path: string; folderId: string }[] = [];

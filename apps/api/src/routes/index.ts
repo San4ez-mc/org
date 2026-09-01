@@ -2155,7 +2155,9 @@ api.post('/companies/:id/detect-facts', async (req, res) => {
     const seen = new Set<string>();
     const chunks: { source: string; content: string }[] = [];
     for (const q of queries) {
-      const r = await vectorSearch(c.vectorToken, q, 5);
+      // Беремо ширше за ліміт контексту (25): частина влучань дублюється між
+      // запитами, і без запасу до LLM доїжджало лише кілька фрагментів.
+      const r = await vectorSearch(c.vectorToken, q, 8);
       for (const it of (r?.results ?? [])) {
         const key = `${it.source}|${it.chunkNo ?? 0}`;
         if (seen.has(key)) continue;

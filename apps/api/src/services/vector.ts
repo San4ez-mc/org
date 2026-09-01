@@ -114,7 +114,105 @@ export async function indexInstruction(instr: {
   return Boolean(r && r.ingested);
 }
 
+// ── Розбиття на чанки ─────────────────────────────────────────────────────────
+// ЧОМУ це критично: ембединг-модель має жорсткий ліміт входу (~2048 токенів у
+// Vertex text-embedding-004) і мовчки обрізає все, що довше. Файл на 69k символів
+// давав ОДИН вектор, у який реально потрапляв лише початок тексту; такий вектор
+// «однаково схожий» на будь-який запит — саме тому пошук на «бізнес процес» і на
+// «кандидат вакансія» повертав ті самі резюме з майже однаковим балом.
+// Один змістовний фрагмент = один вектор; тоді косинус справді щось означає.
+
+/** Цільовий розмір чанка. ~1000 символів ≈ 250–350 токенів української —
+ *  вдесятеро менше ліміту моделі (нічого не обрізається) і водночас достатньо,
+ *  щоб фрагмент лишався самодостатнім для LLM, яка потім читає видачу. */
+const CHUNK_SIZE = 1000;
+/** Перекриття між сусідніми чанками: думка, розрізана по межі, лишається цілою
+ *  хоча б в одному з них (напр. «Місія посади:» в кінці одного, сам текст — на початку наступного). */
+const CHUNK_OVERLAP = 150;
+/** Запобіжник від патологічних файлів (вивантаження таблиць на мегабайти):
+ *  один файл не має права роздути індекс і сповільнити пошук усім іншим. */
+const MAX_CHUNKS_PER_DOC = 400;
+
+/** Хвіст рядка довжиною ~n, обрізаний по межі слова (для перекриття). */
+function tailWords(s: string, n: number): string {
+  if (n <= 0) return '';
+  if (s.length <= n) return s;
+  const t = s.slice(-n);
+  const i = t.search(/\s/);
+  return (i >= 0 ? t.slice(i + 1) : t).trim();
+}
+
+/** Порізати надто довгий блок без абзаців (напр. рядок таблиці) — спершу по
+ *  реченнях, і лише в крайньому разі по пробілах. Слова не розриваємо. */
+function splitLongBlock(block: string, size: number): string[] {
+  const out: string[] = [];
+  let buf = '';
+  for (const part of block.split(/(?<=[.!?;:])\s+/)) {
+    if (part.length > size) {
+      if (buf) { out.push(buf); buf = ''; }
+      let rest = part;
+      while (rest.length > size) {
+        let cut = rest.lastIndexOf(' ', size);
+        if (cut < size * 0.5) cut = size; // суцільний масив без пробілів — інакше не поріжеш
+        out.push(rest.slice(0, cut).trim());
+        rest = rest.slice(cut).trim();
+      }
+      buf = rest;
+      continue;
+    }
+    if (buf && buf.length + 1 + part.length > size) { out.push(buf); buf = part; }
+    else buf = buf ? `${buf} ${part}` : part;
+  }
+  if (buf) out.push(buf);
+  return out.filter(Boolean);
+}
+
+/** Розбити текст документа на чанки по межах абзаців/рядків із перекриттям. */
+export function chunkText(text: string, size = CHUNK_SIZE, overlap = CHUNK_OVERLAP): string[] {
+  const clean = String(text || '').replace(/\r\n?/g, '\n').replace(/[ \t]+\n/g, '\n').trim();
+  if (!clean) return [];
+  if (clean.length <= size + overlap) return [clean];
+
+  // Абзац → (якщо завеликий) рядок → (якщо все ще завеликий) речення/слова.
+  const units = clean
+    .split(/\n{2,}/)
+    .flatMap((b) => (b.length > size ? b.split('\n') : [b]))
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .flatMap((b) => (b.length > size ? splitLongBlock(b, size) : [b]));
+
+  const chunks: string[] = [];
+  let buf = '';
+  for (const u of units) {
+    if (buf && buf.length + 1 + u.length > size) {
+      chunks.push(buf);
+      const carry = tailWords(buf, overlap);
+      buf = carry ? `${carry}\n${u}` : u;
+    } else {
+      buf = buf ? `${buf}\n${u}` : u;
+    }
+  }
+  if (buf.trim()) chunks.push(buf.trim());
+  // Куций хвіст сам по собі майже не несе змісту — приклеюємо до попереднього.
+  if (chunks.length > 1 && chunks[chunks.length - 1].length < 200) {
+    chunks[chunks.length - 2] += `\n${chunks.pop()}`;
+  }
+  return chunks;
+}
+
+/** Очистити чанки колекції проєкту у вектор-базі (ідемпотентна переіндексація).
+ *  Без source — чиститься вся колекція проєкту. Повертає к-ть видалених рядків. */
+export async function deleteVectorChunks(
+  token: string,
+  collection: 'static' | 'dynamic',
+  source?: string,
+): Promise<number> {
+  const r = await call('/delete', source ? { collection, source } : { collection }, token);
+  return r && typeof r.deleted === 'number' ? r.deleted : 0;
+}
+
 /** Проіндексувати файли з Диску компанії (колекція dynamic). Батчами, стійко до відмови.
+ *  Кожен файл ріжеться на чанки; chunkNo зростає в межах файлу.
  *  Повертає к-ть успішно проіндексованих чанків. */
 export async function indexDriveDocuments(
   companyId: string,
@@ -122,14 +220,23 @@ export async function indexDriveDocuments(
   token: string = VECTOR_TOKEN,
 ): Promise<number> {
   if (!docs.length) return 0;
-  const chunks = docs.map((d) => ({
-    source: d.source,
-    content: d.content,
-    folderId: d.folderId || '', // #306 пряма батьківська тека — для токенів-на-папку
-    metadata: { companyId, driveFileId: d.driveFileId, path: d.path, kind: 'drive-file' },
-  }));
+  const chunks: {
+    source: string; chunkNo: number; content: string; folderId: string; metadata: Record<string, unknown>;
+  }[] = [];
+  for (const d of docs) {
+    const parts = chunkText(d.content).slice(0, MAX_CHUNKS_PER_DOC);
+    parts.forEach((content, i) => chunks.push({
+      source: d.source,
+      chunkNo: i,
+      content,
+      folderId: d.folderId || '', // #306 пряма батьківська тека — для токенів-на-папку
+      metadata: { companyId, driveFileId: d.driveFileId, path: d.path, kind: 'drive-file' },
+    }));
+  }
   let ingested = 0;
-  const BATCH = 20;
+  // Розмір батчу — у чанках, а не у файлах: інакше один великий файл давав би
+  // запит на сотні тисяч символів, який вектор-сервіс не витягує.
+  const BATCH = 48;
   for (let i = 0; i < chunks.length; i += BATCH) {
     const r = await call('/ingest', { collection: 'dynamic', chunks: chunks.slice(i, i + BATCH) }, token);
     if (r && typeof r.ingested === 'number') ingested += r.ingested;
@@ -141,9 +248,14 @@ export async function indexDriveDocuments(
  *  Дає семантичний доступ до самої структури (які відділи/посади вже є за теками). */
 export async function indexDriveStructure(companyId: string, content: string, token: string = VECTOR_TOKEN): Promise<number> {
   if (!content.trim()) return 0;
+  // Дерево тек великої компанії теж переростає ліміт моделі — ріжемо так само.
+  const parts = chunkText(content);
   const r = await call('/ingest', {
     collection: 'static',
-    chunks: [{ source: 'Структура папок компанії', content, folderId: '', metadata: { companyId, kind: 'folder-structure' } }],
+    chunks: parts.map((c, i) => ({
+      source: 'Структура папок компанії', chunkNo: i, content: c, folderId: '',
+      metadata: { companyId, kind: 'folder-structure' },
+    })),
   }, token);
   return r && typeof r.ingested === 'number' ? r.ingested : 0;
 }
