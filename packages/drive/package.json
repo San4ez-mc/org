@@ -9,7 +9,9 @@
   },
   "dependencies": {
     "@platform/org-template": "0.1.0",
-    "googleapis": "^144.0.0"
+    "googleapis": "^144.0.0",
+    "mammoth": "^1.12.2",
+    "pdf-parse": "^2.4.5"
   },
   "devDependencies": {
     "@types/node": "^22.9.0",

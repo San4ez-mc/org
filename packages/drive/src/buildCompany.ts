@@ -10,23 +10,50 @@ import {
 } from './drive';
 import {
   CANONICAL_DIVISIONS,
-  POSTS_CONTAINER_NAME,
   DIVISION_PAEI,
   PAEI_ROLES,
 } from '@platform/org-template';
 
-const RULES_DOC_NAME = 'Правила створення посадових інструкцій';
-const INSTRUCTIONS_ORIGINALS_FOLDER = 'Посадові інструкції';
-const WORK_FOLDERS = 'Робочі папки';
-const ARCHIVE = 'Архів';
+/**
+ * Побудова структури папок компанії (модель погоджена з власником 2026-09-01,
+ * повний опис — ШАБЛОН_структури_папок.md).
+ *
+ * Два принципи, які й визначають усе інше:
+ *
+ * 1. **На старті створюється лише скелет.** Раніше будувалися теки під усі 28 посад
+ *    канонічної схеми — для компанії з трьох людей це 28 порожніх папок і 28 фіктивних
+ *    інструкцій. Тепер відділи, посади й папки працівників добудовує ШІ-агент після
+ *    інтерв'ю, коли відомо, що в компанії реально є.
+ *
+ * 2. **Одиниця — ЛЮДИНА, не посада.** Одна людина може обіймати кілька посад; папка
+ *    на посаду вимагала б дублювати її в двох місцях. Тому папки працівників лежать
+ *    окремо від семи відділень, а посади — всередині людини.
+ */
 
+// ── Назви (єдине місце; змінювати тут, а не по коду) ─────────────────────────
+const DIV_BUILD = 1; // Відділення побудови — туди платформа пише свій продукт
+const DEPT_PERSONNEL = 'Відділ направлення та персоналу';
+const HIRING = 'Найм, вакансії';
+const REGULATIONS = 'Регламенти та посадові інструкції';
+const ORGSTRUCTURE = 'Оргструктура';
+const PROCESSES = 'Бізнес процеси';
+const EMPLOYEES = 'Папки працівників';
+const SHARED = 'Спільні документи';
+const ARCHIVE = 'Архів';
+const POSTS_IN_EMPLOYEE = 'Посадові інструкції';
+const WORK_FOLDER = 'Робоча папка';
+
+const SHARED_SUBFOLDERS = ['Бренд, айдентика', 'Політики компанії', 'Стратегія, задумка, історія'];
+
+const RULES_DOC_NAME = 'Правила створення посадових інструкцій';
 const RULES_TEXT = `Правила створення посадових інструкцій
 
-1. Одна посада — один оригінал інструкції. Оригінали зберігаються ТІЛЬКИ тут, у Відділенні побудови → «Посадові інструкції». У папках посад лежать лише ярлики (перегляд).
+1. Одна посада — один оригінал інструкції. Оригінали зберігаються ТІЛЬКИ у Відділенні побудови → «${REGULATIONS}». У папках працівників лежать лише ярлики.
 2. Кожна інструкція описує: ЦКП посади, зону відповідальності, покрокові дії, стандарти якості, звітність.
-3. Зміни вносяться лише в оригінал. Усі, хто тримає цю посаду, отримують зміни автоматично (через ярлик).
-4. Пов'язані інструкції: при зміні перевіряй, чи не треба оновити суміжні — платформа підкаже.
-5. Мова — проста, дієслівна, без води. Формат однаковий для всіх посад.
+3. Зміни вносяться лише в оригінал. Усі, хто тримає цю посаду, бачать зміни одразу — через ярлик.
+4. Статус (чернетка / чинна) живе в платформі, а не в назві теки. Чернетка — це інструкція, на яку ще не опубліковано ярлики.
+5. Виведена з обігу інструкція переноситься в «${ARCHIVE}», а не видаляється.
+6. Мова — проста, дієслівна, без води. Формат однаковий для всіх посад.
 `;
 
 const INSTRUCTION_DRAFT = (postName: string, ckp: string) =>
@@ -34,145 +61,194 @@ const INSTRUCTION_DRAFT = (postName: string, ckp: string) =>
 
 ЦКП (Цінний Кінцевий Продукт): ${ckp}
 
-1. Зона відповідальності: (чернетка — заповнить ШІ під конкретний бізнес)
+1. Зона відповідальності:
 2. Основні дії:
 3. Стандарти якості:
 4. Звітність:
 `;
 
-interface PostRef {
-  divisionLabel: string;
-  deptName: string | null;
-  postName: string;
-  ckp: string;
+/** Шлях до вузлів, які платформа використовує далі. Щоб не шукати їх щоразу наново. */
+export interface CompanySkeleton {
+  companyFolderId: string;
+  url: string;
+  /** Куди складати оригінали інструкцій (усередині — дерево 7 відділень, ліниво). */
+  regulationsRootId: string;
+  /** Тека вакансій: усе, що передує найму. */
+  hiringRootId: string;
+  /** Контейнер папок працівників. */
+  employeesRootId: string;
+  orgSheetId: string;
+  staffSheetId: string;
+  journalSheetId: string;
 }
 
-async function buildPostUnit(containerFolderId: string, originalsRootId: string, ref: PostRef) {
-  const postsContainer = await ensureFolder(containerFolderId, POSTS_CONTAINER_NAME);
-  const postFolder = await ensureFolder(postsContainer, ref.postName);
+/** Сумісність зі старими викликами (agent.ts, scripts/create-company.ts). */
+export type BuildResult = CompanySkeleton;
 
-  // Оригінал інструкції у Побудові (дзеркало оргсхеми)
-  const divOriginals = await ensureFolder(originalsRootId, ref.divisionLabel);
-  const originalParent = ref.deptName ? await ensureFolder(divOriginals, ref.deptName) : divOriginals;
-  const originalDoc = await ensureDoc(
-    originalParent,
-    `${ref.postName} — Інструкція`,
-    INSTRUCTION_DRAFT(ref.postName, ref.ckp),
-  );
+function divisionLabel(boardNo: number): string {
+  const div = CANONICAL_DIVISIONS.find((d) => d.boardNo === boardNo)!;
+  return `${div.boardNo}. ${div.name}`;
+}
 
-  // У папці посади — лише ярлик на оригінал + робочі елементи
-  await ensureShortcut(postFolder, `Посадова інструкція — ${ref.postName}`, originalDoc);
-  await ensureFolder(postFolder, 'Доступні документи');
-  const access = await ensureSpreadsheet(postFolder, 'Доступи');
-  const report = await ensureSpreadsheet(postFolder, 'Звітність');
-  await writeSheetValues(access, [['Google пошта', 'Папка', 'Доступ (✓)']]);
-  await writeSheetValues(report, [['Дата', 'Показник', 'Значення', 'Коментар']]);
+/**
+ * Базовий скелет компанії. Ідемпотентний: повторний виклик нічого не дублює,
+ * бо всі ensure* спершу шукають за назвою.
+ */
+export async function buildCompanyStructure(rootId: string, companyName: string): Promise<CompanySkeleton> {
+  const company = await ensureFolder(rootId, companyName);
 
+  // Сім відділень — каркас методології, однаковий для будь-якого бізнесу.
+  // Відділи всередині них НЕ створюємо: вони залежать від інтерв'ю з клієнтом.
+  const divisionFolders = new Map<number, string>();
+  for (const div of [...CANONICAL_DIVISIONS].sort((a, b) => a.boardNo - b.boardNo)) {
+    divisionFolders.set(div.boardNo, await ensureFolder(company, `${div.boardNo}. ${div.name}`));
+  }
+
+  // Єдиний відділ у скелеті: саме сюди платформа пише свій продукт — інструкції й оргсхему.
+  const personnel = await ensureFolder(divisionFolders.get(DIV_BUILD)!, DEPT_PERSONNEL);
+  const hiringRoot = await ensureFolder(personnel, HIRING);
+  const regulationsRoot = await ensureFolder(personnel, REGULATIONS);
+  await ensureFolder(regulationsRoot, ARCHIVE);
+  await ensureDoc(regulationsRoot, RULES_DOC_NAME, RULES_TEXT);
+
+  const orgStructure = await ensureFolder(personnel, ORGSTRUCTURE);
+  await ensureFolder(orgStructure, PROCESSES);
+  const orgSheet = await ensureSpreadsheet(orgStructure, 'Орг.схема');
+  await ensureSpreadsheet(orgStructure, 'Матриця функцій');
+  const journalSheet = await ensureSpreadsheet(orgStructure, 'Журнал');
+
+  // Папки працівників — окремо від відділень (людина може мати кілька посад).
+  const employeesRoot = await ensureFolder(company, EMPLOYEES);
+  await ensureFolder(employeesRoot, ARCHIVE);
+
+  const shared = await ensureFolder(company, SHARED);
+  for (const name of SHARED_SUBFOLDERS) await ensureFolder(shared, name);
+
+  const staffSheet = await ensureSpreadsheet(company, 'Список працівників');
+
+  await fillOrgSheet(orgSheet);
+  await writeSheetValues(staffSheet, [['Працівник', 'Google пошта', 'Посади', 'Статус', 'Дата найму']]);
+  await writeSheetValues(journalSheet, [['Дата', 'Дія', 'Обʼєкт', 'Деталі', 'Хто']]);
+
+  return {
+    companyFolderId: company,
+    url: driveFolderUrl(company),
+    regulationsRootId: regulationsRoot,
+    hiringRootId: hiringRoot,
+    employeesRootId: employeesRoot,
+    orgSheetId: orgSheet,
+    staffSheetId: staffSheet,
+    journalSheetId: journalSheet,
+  };
+}
+
+/** Оргсхема з PAEI-кольорами Адізеса — довідник, а не структура тек. */
+async function fillOrgSheet(sheetId: string): Promise<void> {
+  const rows: (string | number)[][] = [['№', 'Відділення', 'Відділ', 'ЦКП', 'PAEI', 'Роль (Адізес)']];
+  const colors: RowColor[] = [];
+  let idx = 1; // 0 — заголовок
+
+  for (const div of CANONICAL_DIVISIONS) {
+    const role = DIVISION_PAEI[div.boardNo];
+    const meta = PAEI_ROLES[role];
+    rows.push([div.boardNo, div.name, '', div.ckp, role, meta.name]);
+    colors.push({ startRow: idx, endRow: idx + 1, rgb: meta.color });
+    idx++;
+    for (const dept of div.departments) {
+      rows.push([div.boardNo, div.name, dept.name, dept.ckp, role, meta.name]);
+      colors.push({ startRow: idx, endRow: idx + 1, rgb: meta.color });
+      idx++;
+    }
+  }
+
+  await writeSheetValues(sheetId, rows);
+  await setRowBackground(sheetId, colors, 6);
+}
+
+/**
+ * Оригінал інструкції у Відділенні побудови. Дерево 7 відділень усередині
+ * «Регламенти» створюється ЛІНИВО — лише під ту гілку, для якої з'явилась інструкція.
+ * Інакше поруч із сімома справжніми відділеннями стояли б сім порожніх двійників.
+ */
+export async function ensureInstructionOriginal(
+  regulationsRootId: string,
+  boardNo: number,
+  deptName: string | null,
+  postName: string,
+  ckp: string,
+): Promise<string> {
+  const divFolder = await ensureFolder(regulationsRootId, divisionLabel(boardNo));
+  const parent = deptName ? await ensureFolder(divFolder, deptName) : divFolder;
+  return ensureDoc(parent, `${postName} — Інструкція`, INSTRUCTION_DRAFT(postName, ckp));
+}
+
+/**
+ * Папка працівника. Назву передає викликач із орг-структури (прізвище першим) —
+ * пакет не вигадує форматування імен сам.
+ */
+export async function ensureEmployeeFolder(employeesRootId: string, personName: string): Promise<string> {
+  const folder = await ensureFolder(employeesRootId, personName);
+  await ensureFolder(folder, POSTS_IN_EMPLOYEE);
+  await ensureFolder(folder, WORK_FOLDER);
+  return folder;
+}
+
+/**
+ * Посада всередині папки працівника: ярлик на оригінал + звітність саме цієї посади.
+ *
+ * ⚠️ Ярлик Google Drive НЕ дає прав. Якщо працівник не має доступу до оригіналу,
+ * він побачить ярлик і «Потрібен доступ». Права роздає платформа окремо, за орг-структурою.
+ */
+export async function ensurePostInEmployeeFolder(
+  employeeFolderId: string,
+  postName: string,
+  instructionDocId: string,
+  withReport = false,
+): Promise<string> {
+  const postsRoot = await ensureFolder(employeeFolderId, POSTS_IN_EMPLOYEE);
+  const postFolder = await ensureFolder(postsRoot, postName);
+  await ensureShortcut(postFolder, `Посадова інструкція — ${postName}`, instructionDocId);
+
+  // Звітність — на посаду, а не на людину: коли посади розійдуться між двома
+  // працівниками, вона поїде разом зі своєю посадою. На старті не створюємо.
+  if (withReport) {
+    const report = await ensureSpreadsheet(postFolder, 'Звітність');
+    await writeSheetValues(report, [['Дата', 'Показник', 'Значення', 'Коментар']]);
+  }
   return postFolder;
 }
 
 /**
- * Додати бізнес-специфічну посаду під відповідне відділення (за boardNo).
- * Оригінал інструкції — у Побудові, у папці посади — ярлик. Ідемпотентно.
+ * Тека вакансії — усе, що передує найму. Лишається й після найму: це історія пошуку
+ * і готовий матеріал на наступний раз, тож належить HR-функції, а не людині.
+ */
+export async function ensureVacancyFolder(hiringRootId: string, postName: string): Promise<string> {
+  const folder = await ensureFolder(hiringRootId, postName);
+  await ensureFolder(folder, 'Кандидати');
+  await ensureFolder(folder, 'Навчальні матеріали');
+  return folder;
+}
+
+/**
+ * Додати посаду компанії: оригінал інструкції у Побудові, і — якщо вказано працівника —
+ * ярлик у його папці. Без працівника створюється лише оригінал (вакантна посада).
  */
 export async function addCompanyPost(
   companyFolderId: string,
   boardNo: number,
   title: string,
   ckp: string,
+  personName?: string,
 ): Promise<string> {
-  const div = CANONICAL_DIVISIONS.find((d) => d.boardNo === boardNo) ?? CANONICAL_DIVISIONS.find((d) => d.boardNo === 7)!;
-  const divisionLabel = `${div.boardNo}. ${div.name}`;
-  const divFolder = await ensureFolder(companyFolderId, divisionLabel);
+  const buildDivision = await ensureFolder(companyFolderId, divisionLabel(DIV_BUILD));
+  const personnel = await ensureFolder(buildDivision, DEPT_PERSONNEL);
+  const regulationsRoot = await ensureFolder(personnel, REGULATIONS);
 
-  const pobudova = CANONICAL_DIVISIONS.find((d) => d.boardNo === 1)!;
-  const pobudovaFolder = await ensureFolder(companyFolderId, `${pobudova.boardNo}. ${pobudova.name}`);
-  const originalsRoot = await ensureFolder(pobudovaFolder, INSTRUCTIONS_ORIGINALS_FOLDER);
+  const doc = await ensureInstructionOriginal(regulationsRoot, boardNo, null, title, ckp);
+  if (!personName) return doc;
 
-  return buildPostUnit(divFolder, originalsRoot, { divisionLabel, deptName: null, postName: title, ckp });
-}
-
-export interface BuildResult {
-  companyFolderId: string;
-  url: string;
-  orgSheetId: string;
-  staffSheetId: string;
-  journalSheetId: string;
-}
-
-/**
- * Створює під кореневою папкою повну структуру компанії за уточненою моделлю:
- *  - Оригінали інструкцій у Побудові, у папках посад — ярлики
- *  - Робочі папки (+Архів)
- *  - Дашборд: Оргсхема + Персонал
- */
-export async function buildCompanyStructure(rootId: string, companyName: string): Promise<BuildResult> {
-  const company = await ensureFolder(rootId, companyName);
-
-  // Відділення побудови — тримає оригінали інструкцій і правила
-  const pobudova = CANONICAL_DIVISIONS.find((d) => d.boardNo === 1)!;
-  const pobudovaLabel = `${pobudova.boardNo}. ${pobudova.name}`;
-  const pobudovaFolder = await ensureFolder(company, pobudovaLabel);
-  const originalsRoot = await ensureFolder(pobudovaFolder, INSTRUCTIONS_ORIGINALS_FOLDER);
-  await ensureDoc(pobudovaFolder, RULES_DOC_NAME, RULES_TEXT);
-
-  // Робочі папки + Архів
-  const workRoot = await ensureFolder(company, WORK_FOLDERS);
-  await ensureFolder(workRoot, ARCHIVE);
-
-  // Дашборд: Оргсхема (з PAEI-кольорами Адізеса) + Персонал + Журнал
-  const orgSheet = await ensureSpreadsheet(company, 'Оргсхема');
-  const staffSheet = await ensureSpreadsheet(company, 'Персонал');
-  const journalSheet = await ensureSpreadsheet(company, 'Журнал');
-
-  const orgRows: (string | number)[][] = [['№', 'Відділення', 'Відділ', 'ЦКП', 'PAEI', 'Роль (Адізес)']];
-  const rowColors: RowColor[] = [];
-  let rowIdx = 1; // рядок 0 — заголовок
-  for (const div of CANONICAL_DIVISIONS) {
-    const role = DIVISION_PAEI[div.boardNo];
-    const meta = PAEI_ROLES[role];
-    orgRows.push([div.boardNo, div.name, '', div.ckp, role, meta.name]);
-    rowColors.push({ startRow: rowIdx, endRow: rowIdx + 1, rgb: meta.color });
-    rowIdx++;
-    for (const dept of div.departments) {
-      orgRows.push([div.boardNo, div.name, dept.name, dept.ckp, role, meta.name]);
-      rowColors.push({ startRow: rowIdx, endRow: rowIdx + 1, rgb: meta.color });
-      rowIdx++;
-    }
-  }
-  await writeSheetValues(orgSheet, orgRows);
-  await setRowBackground(orgSheet, rowColors, 6);
-  await writeSheetValues(staffSheet, [['Працівник', 'Google пошта', 'Посади', 'Статус', 'Дата найму']]);
-  await writeSheetValues(journalSheet, [['Дата', 'Дія', 'Обʼєкт', 'Деталі', 'Хто']]);
-
-  // Дерево відділень / відділів / посад
-  for (const div of CANONICAL_DIVISIONS) {
-    const divLabel = `${div.boardNo}. ${div.name}`;
-    const divFolder = await ensureFolder(company, divLabel);
-
-    await buildPostUnit(divFolder, originalsRoot, {
-      divisionLabel: divLabel,
-      deptName: null,
-      postName: `Голова відділення — ${div.name}`,
-      ckp: div.ckp,
-    });
-
-    for (const dept of div.departments) {
-      const deptFolder = await ensureFolder(divFolder, dept.name);
-      await buildPostUnit(deptFolder, originalsRoot, {
-        divisionLabel: divLabel,
-        deptName: dept.name,
-        postName: `Керівник відділу — ${dept.name}`,
-        ckp: dept.ckp,
-      });
-    }
-  }
-
-  return {
-    companyFolderId: company,
-    url: driveFolderUrl(company),
-    orgSheetId: orgSheet,
-    staffSheetId: staffSheet,
-    journalSheetId: journalSheet,
-  };
+  const employeesRoot = await ensureFolder(companyFolderId, EMPLOYEES);
+  const employee = await ensureEmployeeFolder(employeesRoot, personName);
+  await ensurePostInEmployeeFolder(employee, title, doc);
+  return doc;
 }

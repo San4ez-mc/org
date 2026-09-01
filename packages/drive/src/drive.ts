@@ -4,6 +4,8 @@ const FOLDER_MIME = 'application/vnd.google-apps.folder';
 const SHEET_MIME = 'application/vnd.google-apps.spreadsheet';
 const DOC_MIME = 'application/vnd.google-apps.document';
 const SHORTCUT_MIME = 'application/vnd.google-apps.shortcut';
+const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+const PDF_MIME = 'application/pdf';
 
 function escapeName(name: string): string {
   return name.replace(/'/g, "\\'");
@@ -310,8 +312,75 @@ async function readSheetText(fileId: string): Promise<string | null> {
   return text.length > SHEET_TEXT_CAP ? text.slice(0, SHEET_TEXT_CAP) + '\n…(обрізано)' : text;
 }
 
+/** Стеля на завантаження бінарника. Індексація йде пачками по 600+ файлів, і один
+ *  важкий скан-PDF, розгорнутий у пам'яті разом з деревом pdf.js, кладе воркер. */
+const BINARY_MAX_BYTES = 20 * 1024 * 1024;
+
+/** Скільки тексту віддаємо з docx/pdf: далі його все одно ріже чанкер. */
+const BINARY_TEXT_CAP = 200000;
+
+let pdfParseModule: typeof import('pdf-parse') | null = null;
+
+/** pdf-parse тягне за собою pdf.js (десятки МБ). Вантажимо лише коли реально трапився PDF —
+ *  API-процес, який ніколи не читає PDF, не має за це платити пам'яттю на старті. */
+async function loadPdfParse(): Promise<typeof import('pdf-parse')> {
+  if (!pdfParseModule) pdfParseModule = await import('pdf-parse');
+  return pdfParseModule;
+}
+
+/** Звести розкладку документа до плаского тексту й підрізати до стелі.
+ *  У pdf-текст рясно лізуть nbsp і порожні рядки від колонок — у векторі це чистий шум. */
+function normalizeExtracted(raw: string): string | null {
+  const text = raw
+    .replace(/\r\n?/g, '\n')
+    .replace(/[^\S\n]+/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+  if (!text) return null;
+  return text.length > BINARY_TEXT_CAP ? text.slice(0, BINARY_TEXT_CAP) + '\n…(обрізано)' : text;
+}
+
+/** Завантажити файл байтами. null — якщо файл більший за стелю (краще пропустити, ніж лягти). */
+async function downloadBytes(fileId: string): Promise<Buffer | null> {
+  const drive = getDrive();
+  const meta = await withRetry(() =>
+    drive.files.get({ fileId, fields: 'size', ...SHARED_DRIVE_PARAMS }),
+  );
+  const size = Number(meta.data.size ?? 0);
+  if (size > BINARY_MAX_BYTES) return null;
+
+  const res = await withRetry(() =>
+    drive.files.get({ fileId, alt: 'media', ...SHARED_DRIVE_PARAMS }, { responseType: 'arraybuffer' }),
+  );
+  return Buffer.from(res.data as unknown as ArrayBuffer);
+}
+
+/** docx → плаский текст. Розмітку свідомо ігноруємо: у вектор іде зміст, не стилі. */
+async function readDocxText(fileId: string): Promise<string | null> {
+  const buffer = await downloadBytes(fileId);
+  if (!buffer) return null;
+  const mammoth = await import('mammoth');
+  const { value } = await mammoth.extractRawText({ buffer });
+  return normalizeExtracted(value ?? '');
+}
+
+/** pdf → текст усіх сторінок. Скановані PDF (без текстового шару) віддають порожньо → null; OCR не робимо. */
+async function readPdfText(fileId: string): Promise<string | null> {
+  const buffer = await downloadBytes(fileId);
+  if (!buffer) return null;
+  const { PDFParse } = await loadPdfParse();
+  const parser = new PDFParse({ data: new Uint8Array(buffer) });
+  try {
+    const result = await parser.getText();
+    return normalizeExtracted(result.text ?? '');
+  } finally {
+    // pdf.js тримає воркер до явного destroy — без цього процес індексації не завершиться.
+    await parser.destroy().catch(() => {});
+  }
+}
+
 /** Прочитати текст файлу: Google Doc → export text/plain; Google Sheet → усі вкладки;
- *  text/* → media. Інакше null. */
+ *  text/* → media; docx/pdf → завантаження байтів і локальний парсинг. Інакше null. */
 export async function readFileText(file: DriveFileInfo): Promise<string | null> {
   const drive = getDrive();
   try {
@@ -330,7 +399,13 @@ export async function readFileText(file: DriveFileInfo): Promise<string | null> 
       );
       return String(res.data ?? '').trim() || null;
     }
-    return null; // pdf/docx/інше — поки пропускаємо
+    if (file.mimeType === DOCX_MIME) {
+      return await readDocxText(file.id);
+    }
+    if (file.mimeType === PDF_MIME) {
+      return await readPdfText(file.id);
+    }
+    return null; // .doc/.xlsx/зображення/інше — поки пропускаємо
   } catch {
     return null;
   }
