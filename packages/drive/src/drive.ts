@@ -6,6 +6,7 @@ const DOC_MIME = 'application/vnd.google-apps.document';
 const SHORTCUT_MIME = 'application/vnd.google-apps.shortcut';
 const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 const PDF_MIME = 'application/pdf';
+const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
 function escapeName(name: string): string {
   return name.replace(/'/g, "\\'");
@@ -379,6 +380,45 @@ async function readPdfText(fileId: string): Promise<string | null> {
   }
 }
 
+/**
+ * xlsx → текст усіх аркушів. Формат навмисно такий самий, як у readSheetText для
+ * Google Таблиць: назва аркуша рядком, далі клітинки через табуляцію. Інакше однакові
+ * за змістом реєстри давали б у векторі різні за формою чанки.
+ *
+ * exceljs, а не популярніший `xlsx`: у npm-версії останнього (0.18.5) висить
+ * CVE-2023-30533, а виправлені збірки лежать лише на власному CDN SheetJS.
+ */
+async function readXlsxText(fileId: string): Promise<string | null> {
+  const buffer = await downloadBytes(fileId);
+  if (!buffer) return null;
+
+  const ExcelJS = await import('exceljs');
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.load(buffer as any);
+
+  const parts: string[] = [];
+  wb.eachSheet((sheet) => {
+    const rows: string[] = [];
+    sheet.eachRow({ includeEmpty: false }, (row) => {
+      const cells: string[] = [];
+      row.eachCell({ includeEmpty: true }, (cell) => {
+        const v = cell.value as any;
+        // Формули віддають { formula, result } — у вектор має йти результат,
+        // бо шукають за значенням, а не за виразом.
+        const text = v && typeof v === 'object'
+          ? (v.result ?? v.text ?? v.richText?.map((r: any) => r.text).join('') ?? '')
+          : (v ?? '');
+        cells.push(String(text));
+      });
+      const line = cells.join('\t').trim();
+      if (line) rows.push(line);
+    });
+    if (rows.length) parts.push(`# ${sheet.name}\n${rows.join('\n')}`);
+  });
+
+  return normalizeExtracted(parts.join('\n\n'));
+}
+
 /** Прочитати текст файлу: Google Doc → export text/plain; Google Sheet → усі вкладки;
  *  text/* → media; docx/pdf → завантаження байтів і локальний парсинг. Інакше null. */
 export async function readFileText(file: DriveFileInfo): Promise<string | null> {
@@ -398,6 +438,9 @@ export async function readFileText(file: DriveFileInfo): Promise<string | null> 
         drive.files.get({ fileId: file.id, alt: 'media', ...SHARED_DRIVE_PARAMS }, { responseType: 'text' }),
       );
       return String(res.data ?? '').trim() || null;
+    }
+    if (file.mimeType === XLSX_MIME) {
+      return await readXlsxText(file.id);
     }
     if (file.mimeType === DOCX_MIME) {
       return await readDocxText(file.id);
