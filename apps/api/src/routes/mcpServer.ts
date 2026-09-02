@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { prisma } from '@platform/db';
 import { CANONICAL_DIVISIONS } from '@platform/org-template';
+import { classifyPostDivision } from '../services/classifyDivision';
 import { vectorSearch } from '../services/vector';
 import { loadDriveScope, resolveWriteTarget, type DriveScope } from '../services/driveScope';
 import { runAsUser } from '@platform/drive';
@@ -132,11 +133,8 @@ const TOOLS = [
         divisionBoardNo: {
           type: 'number',
           description:
-            'До якого з семи відділень належить посада. 1 — побудова (персонал, процеси, найм у власну команду); '
-            + '2 — поширення (маркетинг, продажі); 3 — фінансове; 4 — технічне (ВИРОБНИЦТВО: те, за що клієнт платить); '
-            + '5 — кваліфікації (якість, навчання); 6 — робота з публікою (PR, партнери); 7 — адміністративне (власник, директор). '
-            + 'Обовʼязково для посад: без цього інструкція ляже в адміністративне відділення. '
-            + 'Увага: якщо послуга компанії — це найм для КЛІЄНТІВ, такі посади належать до 4, а не до 1.',
+            'Не заповнюй: платформа сама визначає відділення за назвою посади та її ЦКП. '
+            + 'Вкажи 1-7 лише тоді, коли клієнт прямо назвав відділення сам.',
         },
       },
       required: ['name'],
@@ -313,6 +311,25 @@ async function ensureDivision(companyId: string, boardNo: number): Promise<strin
   return created.id;
 }
 
+/** Канонічний відділ усередині відділення — створюємо так само ліниво. */
+async function ensureDepartment(
+  companyId: string,
+  divisionId: string | null,
+  name: string,
+): Promise<string | null> {
+  if (!divisionId) return null;
+  const found = await prisma.orgUnit.findFirst({
+    where: { companyId, type: 'DEPARTMENT', parentId: divisionId, name },
+    select: { id: true },
+  });
+  if (found) return found.id;
+  const created = await prisma.orgUnit.create({
+    data: { companyId, type: 'DEPARTMENT', name, parentId: divisionId },
+    select: { id: true },
+  });
+  return created.id;
+}
+
 /** Знайти посаду за назвою в межах компанії — модель оперує назвами, не id. */
 async function resolveReportsTo(companyId: string, name: unknown): Promise<string | null> {
   const q = String(name ?? '').trim();
@@ -439,18 +456,19 @@ async function callTool(name: string, args: any, ctx: Ctx): Promise<unknown> {
         parentId = await ensureDivision(ctx.companyId, boardNo);
       }
 
-      // Посада без відділення «зависає», і її інструкція мовчки лягає в
-      // адміністративне. Модель це поле пропускає, бо в JSON Schema воно
-      // необовʼязкове — тож відмовляємо явно й пояснюємо, що вибрати.
-      // Помилка з підказкою надійніша за опис у схемі: модель одразу виправляється.
+      // Куди належить посада — питання методології, а не памʼяті клієнта й не
+      // здогадки моделі з одного рядка в описі поля. Класифікує платформа: у неї
+      // є канон із ЦКП усіх відділень і відділів. Клієнта про це не питають ніколи.
+      let placement: string | null = null;
       if (unitType === 'POST' && !parentId) {
-        throw new Error(
-          'Для посади потрібно вказати divisionBoardNo — до якого з семи відділень вона належить. '
-          + '1 — побудова (персонал, процеси, найм у свою команду); 2 — поширення (маркетинг, продажі); '
-          + '3 — фінансове; 4 — технічне, тобто ВИРОБНИЦТВО (те, за що платить клієнт); '
-          + '5 — кваліфікації (якість, навчання); 6 — робота з публікою; 7 — адміністративне (власник, директор). '
-          + 'Якщо послуга компанії — робота для клієнтів, ці посади належать до 4.',
-        );
+        const guess = await classifyPostDivision(ctx.companyId, unitName, args?.ckp);
+        const divisionId = await ensureDivision(ctx.companyId, guess.boardNo);
+        parentId = guess.departmentName
+          ? await ensureDepartment(ctx.companyId, divisionId, guess.departmentName)
+          : divisionId;
+        placement = `${guess.boardNo}. ${guess.divisionName}`
+          + (guess.departmentName ? ` → ${guess.departmentName}` : '')
+          + ` (${guess.reason})`;
       }
 
       // Підпорядкування модель називає словами («звітує Засновниці»), а в базі це
@@ -470,7 +488,10 @@ async function callTool(name: string, args: any, ctx: Ctx): Promise<unknown> {
         },
         select: { id: true, name: true, type: true, holderName: true },
       });
-      return { ok: true, mode: 'create', unit: created };
+      // Куди саме лягла посада — повертаємо словами, щоб асистент міг сказати це
+      // клієнту («віднесла до технічного, бо це те, за що платять замовники»)
+      // і клієнт мав шанс заперечити, поки структура ще маленька.
+      return { ok: true, mode: 'create', unit: created, ...(placement && { placement }) };
     }
 
     case 'process_read': {
