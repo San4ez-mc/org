@@ -52,7 +52,12 @@ function findDivisionBoardNo(
 export async function publishStructureToDrive(companyId: string): Promise<PublishResult> {
   const company = await prisma.company.findUnique({
     where: { id: companyId },
-    select: { name: true, driveWriteFolderId: true },
+    select: {
+      name: true,
+      driveWriteFolderId: true,
+      driveRegulationsFolderId: true,
+      driveEmployeesFolderId: true,
+    },
   });
   if (!company) throw new Error('Компанію не знайдено');
   if (!company.driveWriteFolderId || company.driveWriteFolderId === 'root') {
@@ -82,7 +87,20 @@ export async function publishStructureToDrive(companyId: string): Promise<Publis
 
   await withCompanyDrive(companyId, async () => {
     const root = company.driveWriteFolderId!;
-    const skeleton = await buildSkeletonInFolder(root);
+
+    // Скелет обходить два десятки тек — це довше за таймаут інструмента агента.
+    // Тому вузли запамʼятовуємо після першої побудови й далі беремо готові.
+    let regulationsRootId = company.driveRegulationsFolderId;
+    let employeesRootId = company.driveEmployeesFolderId;
+    if (!regulationsRootId || !employeesRootId) {
+      const skeleton = await buildSkeletonInFolder(root);
+      regulationsRootId = skeleton.regulationsRootId;
+      employeesRootId = skeleton.employeesRootId;
+      await prisma.company.update({
+        where: { id: companyId },
+        data: { driveRegulationsFolderId: regulationsRootId, driveEmployeesFolderId: employeesRootId },
+      });
+    }
 
     // ── 1. Оригінали інструкцій ────────────────────────────────────────────
     const docByPostId = new Map<string, string>();
@@ -92,7 +110,7 @@ export async function publishStructureToDrive(companyId: string): Promise<Publis
       const deptName = parent?.type === 'DEPARTMENT' ? parent.name : null;
 
       const docId = await ensureInstructionOriginal(
-        skeleton.regulationsRootId,
+        regulationsRootId,
         boardNo,
         deptName,
         post.name,
@@ -103,25 +121,37 @@ export async function publishStructureToDrive(companyId: string): Promise<Publis
     }
 
     // ── 2-3. Теки працівників і посад усередині них ────────────────────────
-    for (const m of members) {
-      // Прізвище першим — так теки сортуються за людьми, а не за іменами.
-      const personName = [m.lastName, m.firstName].filter(Boolean).join(' ').trim();
-      if (!personName) continue;
-      if (!m.posts.length) {
-        skipped.push({ post: personName, reason: 'людина без посади — теку не створюємо' });
-        continue;
-      }
+    // Джерела два. Member — коли людину завели як працівника (через прив'язку
+    // Telegram чи вручну). holderName на посаді — коли її назвав асистент у розмові:
+    // саме так наповнюється структура під час знайомства, і без цього теки
+    // працівників не створювались узагалі.
+    const byPerson = new Map<string, { id: string; name: string }[]>();
 
-      const folder = await ensureEmployeeFolder(skeleton.employeesRootId, personName);
+    for (const m of members) {
+      const personName = [m.lastName, m.firstName].filter(Boolean).join(' ').trim();
+      if (!personName || !m.posts.length) continue;
+      byPerson.set(personName, m.posts.map((p) => ({ id: p.postUnit.id, name: p.postUnit.name })));
+    }
+
+    for (const post of posts) {
+      const holder = (post.holderName || '').trim();
+      if (!holder) continue;
+      const list = byPerson.get(holder) ?? [];
+      if (!list.some((x) => x.id === post.id)) list.push({ id: post.id, name: post.name });
+      byPerson.set(holder, list);
+    }
+
+    for (const [personName, personPosts] of byPerson) {
+      const folder = await ensureEmployeeFolder(employeesRootId, personName);
       employeesCreated++;
 
-      for (const p of m.posts) {
-        const docId = docByPostId.get(p.postUnit.id);
+      for (const p of personPosts) {
+        const docId = docByPostId.get(p.id);
         if (!docId) {
-          skipped.push({ post: `${personName} / ${p.postUnit.name}`, reason: 'немає оригіналу інструкції' });
+          skipped.push({ post: `${personName} / ${p.name}`, reason: 'немає оригіналу інструкції' });
           continue;
         }
-        await ensurePostInEmployeeFolder(folder, p.postUnit.name, docId);
+        await ensurePostInEmployeeFolder(folder, p.name, docId);
         postFoldersCreated++;
       }
     }

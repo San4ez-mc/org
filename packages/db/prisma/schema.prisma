@@ -68,6 +68,10 @@ model Company {
   driveScanFolderId    String? // що асистент читає й шукає; порожньо = весь диск клієнта
   driveWriteFolderId   String? // ЄДИНА тека, куди асистенту дозволено писати; порожньо = запис заборонено
   driveWritableFolders String[] @default([]) // дозволені підтеки під текою запису (префікси назв); порожньо = вся тека
+  // Вузли скелета на Диску. Кешуємо, бо інакше кожна публікація обходить дерево
+  // з двох десятків тек, і виклик не встигає в таймаут інструмента агента.
+  driveRegulationsFolderId String? // куди кладемо оригінали посадових інструкцій
+  driveEmployeesFolderId   String? // контейнер тек працівників
   googleImpersonateUser String? // domain-wide delegation: від імені кого діємо на Диску клієнта; порожньо = звичайний сервіс-акаунт
   driveExcludedIds  String[] @default([]) // #302 id тек/файлів Drive, виключені з індексації
   driveIndexedAt    DateTime? // #303 час останньої успішної індексації папки у вектор
