@@ -110,10 +110,17 @@ const TOOLS = [
       type: 'object',
       properties: {
         id: { type: 'string', description: 'Пропусти, щоб створити нову одиницю' },
-        name: { type: 'string' },
+        name: {
+          type: 'string',
+          description: 'ТІЛЬКИ назва посади чи підрозділу, без імені людини. «Ресерчер», а не «Ресерчер — Оксана Мельник».',
+        },
         type: { type: 'string', enum: ['DIVISION', 'DEPARTMENT', 'SECTION', 'POST'] },
         parentId: { type: 'string', description: 'Батьківська одиниця; для відділення пропусти' },
         ckp: { type: 'string', description: 'Цінний кінцевий продукт' },
+        holderName: {
+          type: 'string',
+          description: 'Хто обіймає посаду — прізвище й імʼя. Саме звідси беруться теки працівників на Диску. Порожньо = вакансія.',
+        },
       },
       required: ['name'],
     },
@@ -335,11 +342,20 @@ async function callTool(name: string, args: any, ctx: Ctx): Promise<unknown> {
     case 'org_unit_upsert': {
       const unitName = String(args?.name ?? '').trim();
       if (!unitName) throw new Error('Поле name обовязкове');
+      // Модель схильна вписувати людину в назву («Ресерчер — Оксана»), бо так
+      // природніше говорити. Відрізаємо: тека працівника будується з holderName,
+      // а посада має лишатись посадою, інакше при зміні людини поїде вся структура.
+      const holder = String(args?.holderName ?? '').trim();
+
       if (args?.id) {
         const updated = await prisma.orgUnit.update({
           where: { id: String(args.id) },
-          data: { name: unitName, ...(args?.ckp !== undefined && { ckp: args.ckp || null }) },
-          select: { id: true, name: true, type: true },
+          data: {
+            name: unitName,
+            ...(args?.ckp !== undefined && { ckp: args.ckp || null }),
+            ...(args?.holderName !== undefined && { holderName: holder || null, isVacant: !holder }),
+          },
+          select: { id: true, name: true, type: true, holderName: true },
         });
         return { ok: true, mode: 'update', unit: updated };
       }
@@ -350,8 +366,10 @@ async function callTool(name: string, args: any, ctx: Ctx): Promise<unknown> {
           type: (args?.type || 'POST') as any,
           parentId: args?.parentId ? String(args.parentId) : null,
           ckp: args?.ckp ? String(args.ckp) : null,
+          holderName: holder || null,
+          isVacant: !holder,
         },
-        select: { id: true, name: true, type: true },
+        select: { id: true, name: true, type: true, holderName: true },
       });
       return { ok: true, mode: 'create', unit: created };
     }
