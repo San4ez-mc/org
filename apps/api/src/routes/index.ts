@@ -12,6 +12,7 @@ import { startDriveIndex, getIndexProgress } from '../services/driveIndexer';
 import { driveTools } from './driveTools';
 import { agentTools } from './agentTools';
 import { companyDriveContext, forgetCompanyDriveContext } from '../middleware/companyDriveContext';
+import { publishStructureToDrive } from '../services/publishStructure';
 import { CANONICAL_DIVISIONS } from '@platform/org-template';
 
 /**
@@ -2184,6 +2185,36 @@ api.post('/companies/:id/build-structure', async (req, res) => {
     res.json(built);
   } catch (err) {
     res.status(500).json({ error: String(err) });
+  }
+});
+
+/**
+ * Перенести орг-структуру з бази на Диск: оригінали інструкцій, теки працівників,
+ * теки посад із ярликами. Ланка, якої не було — база наповнювалась, а на Диску
+ * не зʼявлялось нічого.
+ */
+api.post('/companies/:id/publish-structure', async (req, res) => {
+  try {
+    const r = await publishStructureToDrive(req.params.id);
+    await prisma.changeLog.create({
+      data: {
+        companyId: req.params.id,
+        entity: 'structure',
+        action: 'update',
+        summary: `Опубліковано на Диск: інструкцій ${r.instructionsCreated}, тек працівників ${r.employeesCreated}`,
+        author: req.body?.author ?? 'система',
+      },
+    }).catch(() => {});
+    res.json(r);
+  } catch (err) {
+    const msg = String(err);
+    if (msg.includes('no-write-folder')) {
+      return void res.status(400).json({
+        error: 'no-write-folder',
+        hint: 'Спершу створіть теку для запису — структура має лягти в неї, а не в корінь диска клієнта.',
+      });
+    }
+    res.status(500).json({ error: msg });
   }
 });
 

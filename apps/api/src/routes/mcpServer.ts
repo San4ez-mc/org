@@ -3,6 +3,7 @@ import { prisma } from '@platform/db';
 import { vectorSearch } from '../services/vector';
 import { loadDriveScope, resolveWriteTarget, type DriveScope } from '../services/driveScope';
 import { runAsUser } from '@platform/drive';
+import { publishStructureToDrive } from '../services/publishStructure';
 import {
   searchFiles, readFileById, writeFile,
   readSheetRows, updateSheetRow, appendSheetValues,
@@ -140,6 +141,15 @@ const TOOLS = [
       },
       required: ['name'],
     },
+  },
+  {
+    name: 'publish_structure',
+    domain: 'process',
+    description:
+      'Перенести орг-структуру на Google Drive: створити оригінали посадових інструкцій, теки працівників '
+      + 'і теки їхніх посад із ярликами на інструкції. Клич ПІСЛЯ того, як зібрав процеси, людей і посади — '
+      + 'зазвичай наприкінці знайомства. Ідемпотентно: повторний виклик нічого не дублює.',
+    inputSchema: { type: 'object', properties: {} },
   },
   {
     name: 'instruction_read',
@@ -384,6 +394,9 @@ async function callTool(name: string, args: any, ctx: Ctx): Promise<unknown> {
       });
       return { ok: true, mode: 'create', process: created };
     }
+
+    case 'publish_structure':
+      return publishStructureToDrive(ctx.companyId);
 
     case 'instruction_read': {
       const q = String(args?.query ?? '').trim().toLowerCase();
