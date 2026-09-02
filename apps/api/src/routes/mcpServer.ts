@@ -4,6 +4,7 @@ import { vectorSearch } from '../services/vector';
 import { loadDriveScope, resolveWriteTarget, type DriveScope } from '../services/driveScope';
 import { runAsUser } from '@platform/drive';
 import { publishStructureToDrive } from '../services/publishStructure';
+import { generateInstructions } from '../services/generateInstructions';
 import {
   searchFiles, readFileById, writeFile,
   readSheetRows, updateSheetRow, appendSheetValues,
@@ -121,6 +122,15 @@ const TOOLS = [
           type: 'string',
           description: 'Хто обіймає посаду — прізвище й імʼя. Саме звідси беруться теки працівників на Диску. Порожньо = вакансія.',
         },
+        divisionBoardNo: {
+          type: 'number',
+          description:
+            'До якого з семи відділень належить посада. 1 — побудова (персонал, процеси, найм у власну команду); '
+            + '2 — поширення (маркетинг, продажі); 3 — фінансове; 4 — технічне (ВИРОБНИЦТВО: те, за що клієнт платить); '
+            + '5 — кваліфікації (якість, навчання); 6 — робота з публікою (PR, партнери); 7 — адміністративне (власник, директор). '
+            + 'Обовʼязково для посад: без цього інструкція ляже в адміністративне відділення. '
+            + 'Увага: якщо послуга компанії — це найм для КЛІЄНТІВ, такі посади належать до 4, а не до 1.',
+        },
       },
       required: ['name'],
     },
@@ -156,6 +166,14 @@ const TOOLS = [
       'Перенести орг-структуру на Google Drive: створити оригінали посадових інструкцій, теки працівників '
       + 'і теки їхніх посад із ярликами на інструкції. Клич ПІСЛЯ того, як зібрав процеси, людей і посади — '
       + 'зазвичай наприкінці знайомства. Ідемпотентно: повторний виклик нічого не дублює.',
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'generate_instructions',
+    domain: 'process',
+    description:
+      'Наповнити посадові інструкції змістом на основі описаних процесів і ЦКП посад. '
+      + 'Клич ПІСЛЯ publish_structure. Довга операція — попередь, що це займе хвилину.',
     inputSchema: { type: 'object', properties: {} },
   },
   {
@@ -359,12 +377,24 @@ async function callTool(name: string, args: any, ctx: Ctx): Promise<unknown> {
         });
         return { ok: true, mode: 'update', unit: updated };
       }
+      // Без батька посада «зависає» і при публікації падає в адміністративне
+      // відділення. Якщо модель назвала номер відділення — підвʼязуємо до нього.
+      let parentId = args?.parentId ? String(args.parentId) : null;
+      const boardNo = Number(args?.divisionBoardNo) || 0;
+      if (!parentId && boardNo >= 1 && boardNo <= 7) {
+        const div = await prisma.orgUnit.findFirst({
+          where: { companyId: ctx.companyId, type: 'DIVISION', boardNo },
+          select: { id: true },
+        });
+        if (div) parentId = div.id;
+      }
+
       const created = await prisma.orgUnit.create({
         data: {
           companyId: ctx.companyId,
           name: unitName,
           type: (args?.type || 'POST') as any,
-          parentId: args?.parentId ? String(args.parentId) : null,
+          parentId,
           ckp: args?.ckp ? String(args.ckp) : null,
           holderName: holder || null,
           isVacant: !holder,
@@ -412,6 +442,9 @@ async function callTool(name: string, args: any, ctx: Ctx): Promise<unknown> {
       });
       return { ok: true, mode: 'create', process: created };
     }
+
+    case 'generate_instructions':
+      return generateInstructions(ctx.companyId);
 
     case 'publish_structure':
       return publishStructureToDrive(ctx.companyId);

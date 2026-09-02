@@ -13,6 +13,7 @@ import { driveTools } from './driveTools';
 import { agentTools } from './agentTools';
 import { companyDriveContext, forgetCompanyDriveContext } from '../middleware/companyDriveContext';
 import { publishStructureToDrive } from '../services/publishStructure';
+import { generateInstructions } from '../services/generateInstructions';
 import { CANONICAL_DIVISIONS } from '@platform/org-template';
 
 /**
@@ -2213,6 +2214,19 @@ api.post('/companies/:id/publish-structure', async (req, res) => {
         error: 'no-write-folder',
         hint: 'Спершу створіть теку для запису — структура має лягти в неї, а не в корінь диска клієнта.',
       });
+    }
+    res.status(500).json({ error: msg });
+  }
+});
+
+/** Наповнити посадові інструкції змістом із процесів компанії. */
+api.post('/companies/:id/instructions/generate', async (req, res) => {
+  try {
+    res.json(await generateInstructions(req.params.id));
+  } catch (err) {
+    const msg = String(err);
+    if (msg.includes('no-regulations-folder')) {
+      return void res.status(400).json({ error: 'no-regulations-folder', hint: 'Спершу опублікуйте структуру на Диск.' });
     }
     res.status(500).json({ error: msg });
   }

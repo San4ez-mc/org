@@ -12,6 +12,7 @@ import {
   CANONICAL_DIVISIONS,
   DIVISION_PAEI,
   PAEI_ROLES,
+  instructionSkeleton,
 } from '@platform/org-template';
 
 /**
@@ -56,16 +57,9 @@ const RULES_TEXT = `Правила створення посадових інс�
 6. Мова — проста, дієслівна, без води. Формат однаковий для всіх посад.
 `;
 
-const INSTRUCTION_DRAFT = (postName: string, ckp: string) =>
-  `Посадова інструкція — ${postName}
-
-ЦКП (Цінний Кінцевий Продукт): ${ckp}
-
-1. Зона відповідальності:
-2. Основні дії:
-3. Стандарти якості:
-4. Звітність:
-`;
+// Каркас беремо з org-template: структура інструкції — методологія, вона має бути
+// одна для всіх компаній і мінятись в одному місці, а не тут у рядку.
+const INSTRUCTION_DRAFT = (postName: string, ckp: string) => instructionSkeleton(postName, ckp);
 
 /** Шлях до вузлів, які платформа використовує далі. Щоб не шукати їх щоразу наново. */
 export interface CompanySkeleton {
