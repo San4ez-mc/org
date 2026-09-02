@@ -102,27 +102,25 @@ async function interviewDivisions(p: Params, ctx: AgentContext): Promise<AgentRe
       created++;
     }
 
-    // Посаду голови заводимо, ЛИШЕ коли названо людину. Порожня «Голова відділення»
-    // на кожне з семи відділень — це дев'ять фантомних вакансій і стільки ж порожніх
-    // чернеток інструкцій у компанії на трьох людей. Вакансії живуть в орг-структурі
-    // як факт «посади немає», а не як порожня картка.
+    // Голова відділення створюється ЗАВЖДИ, навіть без людини: сім відділень —
+    // це канонічний борд, і в малій компанії їх усі тягне власник. Порожня посада
+    // тут означає «цю функцію ніхто не веде» — саме те, що має бути видно.
+    // Відділи поводяться інакше (див. стадію 2): там посада йде за людиною.
     const leadName = ov ? S(ov.leadName) : '';
-    if (leadName) {
-      const headName = `Голова відділення — ${div.name}`;
-      const head = await prisma.orgUnit.findFirst({
-        where: { companyId, parentId: unit.id, type: 'POST', name: headName },
-        select: { id: true },
+    const headName = `Голова відділення — ${div.name}`;
+    const head = await prisma.orgUnit.findFirst({
+      where: { companyId, parentId: unit.id, type: 'POST', name: headName },
+      select: { id: true },
+    });
+    if (!head) {
+      await prisma.orgUnit.create({
+        data: {
+          companyId, parentId: unit.id, type: 'POST', name: headName,
+          ckp: (ov && S(ov.ckp)) || div.ckp, holderName: leadName || null, isVacant: !leadName,
+        },
       });
-      if (head) {
-        await prisma.orgUnit.update({ where: { id: head.id }, data: { holderName: leadName, isVacant: false } });
-      } else {
-        await prisma.orgUnit.create({
-          data: {
-            companyId, parentId: unit.id, type: 'POST', name: headName,
-            ckp: (ov && S(ov.ckp)) || div.ckp, holderName: leadName, isVacant: false,
-          },
-        });
-      }
+    } else if (leadName) {
+      await prisma.orgUnit.update({ where: { id: head.id }, data: { holderName: leadName, isVacant: false } });
     }
   }
 
