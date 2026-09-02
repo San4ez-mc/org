@@ -4,6 +4,9 @@ import {
   ensureInstructionOriginal,
   ensureEmployeeFolder,
   ensurePostInEmployeeFolder,
+  ensureFolder,
+  listFolderFiles,
+  moveFile,
   driveFolderUrl,
 } from '@platform/drive';
 import { CANONICAL_DIVISIONS, instructionSkeleton } from '@platform/org-template';
@@ -32,6 +35,7 @@ export interface PublishResult {
   employeesCreated: number;
   postFoldersCreated: number;
   skipped: { post: string; reason: string }[];
+  archived: string[];
 }
 
 /** Відділення, до якого належить одиниця: піднімаємось деревом до типу DIVISION. */
@@ -81,6 +85,7 @@ export async function publishStructureToDrive(companyId: string): Promise<Publis
   });
 
   const skipped: PublishResult['skipped'] = [];
+  const archived: string[] = [];
   let instructionsCreated = 0;
   let employeesCreated = 0;
   let postFoldersCreated = 0;
@@ -141,6 +146,19 @@ export async function publishStructureToDrive(companyId: string): Promise<Publis
       byPerson.set(holder, list);
     }
 
+    // ── 4. Прибирання застарілого ──────────────────────────────────────────
+    // Посаду перейменували чи прибрали — її документ лишається лежати й вводити
+    // в оману. Не видаляємо (на диску клієнта це надто дорога помилка), а
+    // переносимо в «Архів»: зворотно й видно, що сталось.
+    const liveDocIds = new Set(docByPostId.values());
+    const archiveFolder = await ensureFolder(regulationsRootId, 'Архів');
+    for (const f of await listFolderFiles(regulationsRootId)) {
+      if (!/ — Інструкція$/.test(f.name)) continue;
+      if (liveDocIds.has(f.id)) continue;
+      await moveFile(f.id, archiveFolder);
+      archived.push(f.name);
+    }
+
     for (const [personName, personPosts] of byPerson) {
       const folder = await ensureEmployeeFolder(employeesRootId, personName);
       employeesCreated++;
@@ -163,6 +181,7 @@ export async function publishStructureToDrive(companyId: string): Promise<Publis
     employeesCreated,
     postFoldersCreated,
     skipped,
+    archived,
   };
 }
 

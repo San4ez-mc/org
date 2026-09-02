@@ -121,6 +121,34 @@ export async function ensureShortcut(parentId: string, name: string, targetId: s
   return res.data.id!;
 }
 
+/**
+ * Перемістити файл в іншу теку.
+ *
+ * Видаляти платформа не вміє свідомо — на клієнтському диску це надто дорога
+ * помилка. Але застаріле треба кудись прибирати, інакше тека інструкцій обростає
+ * сміттям після кожного перейменування посади. Переміщення в «Архів» — це і є
+ * наш еквівалент видалення: зворотний і видимий.
+ */
+export async function moveFile(fileId: string, targetFolderId: string): Promise<void> {
+  const drive = getDrive();
+  const meta = await withRetry(() =>
+    drive.files.get({ fileId, fields: 'parents', ...SHARED_DRIVE_PARAMS }),
+  );
+  const previous = (meta.data.parents ?? []).join(',');
+  if (!previous) return;
+  if (previous === targetFolderId) return;
+
+  await withRetry(() =>
+    drive.files.update({
+      fileId,
+      addParents: targetFolderId,
+      removeParents: previous,
+      fields: 'id',
+      ...SHARED_DRIVE_PARAMS,
+    }),
+  );
+}
+
 /** Записати значення у таблицю (з лівого верхнього кута аркуша). */
 export async function writeSheetValues(spreadsheetId: string, values: (string | number)[][], range = 'A1'): Promise<void> {
   const sheets = getSheets();

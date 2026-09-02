@@ -52,14 +52,24 @@ function stepsForPost(
   return out.join('\n') || '(у описаних процесах ця посада поки не фігурує)';
 }
 
-/** Відділення посади: піднімаємось до DIVISION, інакше адміністративне. */
-function divisionOf(parent: { name: string; type: string; boardNo: number | null } | null): {
-  boardNo: number;
-  deptName: string | null;
-} {
-  if (!parent) return { boardNo: 7, deptName: null };
-  if (parent.type === 'DIVISION') return { boardNo: parent.boardNo ?? 7, deptName: null };
-  return { boardNo: 7, deptName: parent.type === 'DEPARTMENT' ? parent.name : null };
+/**
+ * Відділення посади. Раніше при батьку-ВІДДІЛІ поверталось 7 — і всі інструкції
+ * відділів падали в адміністративне. Тепер піднімаємось деревом до відділення.
+ */
+function divisionOf(
+  parentId: string | null,
+  byId: Map<string, { parentId: string | null; type: string; name: string; boardNo: number | null }>,
+): { boardNo: number; deptName: string | null } {
+  let deptName: string | null = null;
+  let cur = parentId;
+  for (let hop = 0; hop < 10 && cur; hop++) {
+    const u = byId.get(cur);
+    if (!u) break;
+    if (u.type === 'DEPARTMENT' && !deptName) deptName = u.name;
+    if (u.type === 'DIVISION' && u.boardNo) return { boardNo: u.boardNo, deptName };
+    cur = u.parentId;
+  }
+  return { boardNo: 7, deptName };
 }
 
 export async function generateInstructions(companyId: string): Promise<GenerateResult> {
@@ -70,15 +80,15 @@ export async function generateInstructions(companyId: string): Promise<GenerateR
   if (!company) throw new Error('Компанію не знайдено');
   if (!company.driveRegulationsFolderId) throw new Error('no-regulations-folder');
 
-  const posts = await prisma.orgUnit.findMany({
-    where: { companyId, type: 'POST' },
+  const units = await prisma.orgUnit.findMany({
+    where: { companyId },
     select: {
-      name: true,
-      ckp: true,
-      holderName: true,
-      parent: { select: { name: true, type: true, boardNo: true } },
+      id: true, parentId: true, type: true, name: true, ckp: true, boardNo: true,
+      holderName: true, reportsToUnitId: true,
     },
   });
+  const byId = new Map(units.map((u) => [u.id, u]));
+  const posts = units.filter((u) => u.type === 'POST');
   const processes = await prisma.process.findMany({
     where: { companyId },
     select: { name: true, description: true, steps: true },
@@ -95,7 +105,8 @@ export async function generateInstructions(companyId: string): Promise<GenerateR
         company.mission ? `Чим займається компанія: ${company.mission}` : '',
         company.companyCkp ? `ЦКП компанії: ${company.companyCkp}` : '',
         post.ckp ? `ЦКП посади (основа першого розділу): ${post.ckp}` : '',
-        post.parent?.name ? `Підрозділ: ${post.parent.name}` : '',
+        (() => { const d = byId.get(post.parentId ?? ''); return d ? `Підрозділ: ${d.name}` : ''; })(),
+        (() => { const b = post.reportsToUnitId ? byId.get(post.reportsToUnitId) : null; return b ? `Підпорядковується: ${b.name}${b.holderName ? ` (${b.holderName})` : ''}` : ''; })(),
         post.holderName ? `Зараз обіймає: ${post.holderName}` : 'Посада вакантна.',
         `Інші посади в компанії: ${allPosts}`,
         '',
@@ -122,7 +133,7 @@ export async function generateInstructions(companyId: string): Promise<GenerateR
 
       // Пишемо в ТОЙ САМИЙ документ, що створила публікація, а не поруч:
       // ensureInstructionOriginal ідемпотентний і віддає id наявного оригіналу.
-      const { boardNo, deptName } = divisionOf(post.parent);
+      const { boardNo, deptName } = divisionOf(post.parentId, byId);
       const docId = await ensureInstructionOriginal(
         company.driveRegulationsFolderId!,
         boardNo,

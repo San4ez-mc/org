@@ -122,6 +122,12 @@ const TOOLS = [
           type: 'string',
           description: 'Хто обіймає посаду — прізвище й імʼя. Саме звідси беруться теки працівників на Диску. Порожньо = вакансія.',
         },
+        reportsTo: {
+          type: 'string',
+          description:
+            'Назва посади, якій ця підпорядковується («Засновниця»). Саме звідси береться '
+            + 'підпорядкування в інструкції — без цього там стоятиме «потребує уточнення».',
+        },
         divisionBoardNo: {
           type: 'number',
           description:
@@ -285,6 +291,17 @@ function normalizeSteps(steps: unknown): unknown {
   });
 }
 
+/** Знайти посаду за назвою в межах компанії — модель оперує назвами, не id. */
+async function resolveReportsTo(companyId: string, name: unknown): Promise<string | null> {
+  const q = String(name ?? '').trim();
+  if (!q) return null;
+  const unit = await prisma.orgUnit.findFirst({
+    where: { companyId, type: 'POST', name: { contains: q, mode: 'insensitive' } },
+    select: { id: true },
+  });
+  return unit?.id ?? null;
+}
+
 async function callTool(name: string, args: any, ctx: Ctx): Promise<unknown> {
   const needDrive = () => {
     if (!ctx.driveRootFolderId) throw new Error('У компанії не підключена тека на Google Drive');
@@ -372,6 +389,9 @@ async function callTool(name: string, args: any, ctx: Ctx): Promise<unknown> {
             name: unitName,
             ...(args?.ckp !== undefined && { ckp: args.ckp || null }),
             ...(args?.holderName !== undefined && { holderName: holder || null, isVacant: !holder }),
+            ...(args?.reportsTo !== undefined && {
+              reportsToUnitId: await resolveReportsTo(ctx.companyId, args.reportsTo),
+            }),
           },
           select: { id: true, name: true, type: true, holderName: true },
         });
@@ -389,6 +409,10 @@ async function callTool(name: string, args: any, ctx: Ctx): Promise<unknown> {
         if (div) parentId = div.id;
       }
 
+      // Підпорядкування модель називає словами («звітує Засновниці»), а в базі це
+      // посилання на іншу посаду. Резолвимо за назвою — id вона не знає й не має знати.
+      const reportsToUnitId = await resolveReportsTo(ctx.companyId, args?.reportsTo);
+
       const created = await prisma.orgUnit.create({
         data: {
           companyId: ctx.companyId,
@@ -398,6 +422,7 @@ async function callTool(name: string, args: any, ctx: Ctx): Promise<unknown> {
           ckp: args?.ckp ? String(args.ckp) : null,
           holderName: holder || null,
           isVacant: !holder,
+          reportsToUnitId,
         },
         select: { id: true, name: true, type: true, holderName: true },
       });
