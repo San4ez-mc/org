@@ -236,6 +236,20 @@ function recordToRow(header: string[], record: Record<string, unknown>): string[
   });
 }
 
+/**
+ * Крок процесу: інтерфейс і решта платформи читають `postTitle`, а модель у промпті
+ * оперує коротшим `post`. Зводимо до одного поля на записі — інакше процес, збережений
+ * асистентом, показувався б на фронті без відповідального.
+ */
+function normalizeSteps(steps: unknown): unknown {
+  if (!Array.isArray(steps)) return steps;
+  return steps.map((s) => {
+    if (!s || typeof s !== 'object') return s;
+    const { post, postTitle, ...rest } = s as Record<string, unknown>;
+    return { ...rest, postTitle: postTitle ?? post ?? '' };
+  });
+}
+
 async function callTool(name: string, args: any, ctx: Ctx): Promise<unknown> {
   const needDrive = () => {
     if (!ctx.driveRootFolderId) throw new Error('У компанії не підключена тека на Google Drive');
@@ -357,7 +371,7 @@ async function callTool(name: string, args: any, ctx: Ctx): Promise<unknown> {
       const data: any = {
         name: procName,
         ...(args?.description !== undefined && { description: args.description || null }),
-        ...(args?.steps !== undefined && { steps: args.steps }),
+        ...(args?.steps !== undefined && { steps: normalizeSteps(args.steps) }),
       };
       if (args?.id) {
         const updated = await prisma.process.update({
