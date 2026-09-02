@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { prisma } from '@platform/db';
+import { CANONICAL_DIVISIONS } from '@platform/org-template';
 import { vectorSearch } from '../services/vector';
 import { loadDriveScope, resolveWriteTarget, type DriveScope } from '../services/driveScope';
 import { runAsUser } from '@platform/drive';
@@ -291,6 +292,27 @@ function normalizeSteps(steps: unknown): unknown {
   });
 }
 
+/**
+ * Канонічне відділення за номером. Створюємо ліниво: сім відділень зʼявляються
+ * лише в стадійному інтервʼю, а асистент користується цим інструментом — без
+ * цього пошук за номером нічого не знаходив і посади лишались без батька.
+ */
+async function ensureDivision(companyId: string, boardNo: number): Promise<string | null> {
+  const found = await prisma.orgUnit.findFirst({
+    where: { companyId, type: 'DIVISION', boardNo },
+    select: { id: true },
+  });
+  if (found) return found.id;
+
+  const canon = CANONICAL_DIVISIONS.find((d) => d.boardNo === boardNo);
+  if (!canon) return null;
+  const created = await prisma.orgUnit.create({
+    data: { companyId, type: 'DIVISION', name: canon.name, boardNo, ckp: canon.ckp },
+    select: { id: true },
+  });
+  return created.id;
+}
+
 /** Знайти посаду за назвою в межах компанії — модель оперує назвами, не id. */
 async function resolveReportsTo(companyId: string, name: unknown): Promise<string | null> {
   const q = String(name ?? '').trim();
@@ -399,21 +421,29 @@ async function callTool(name: string, args: any, ctx: Ctx): Promise<unknown> {
       }
       // Без батька посада «зависає» і при публікації падає в адміністративне
       // відділення. Якщо модель назвала номер відділення — підвʼязуємо до нього.
+      const unitType = String(args?.type || 'POST');
+
+      // Відділень рівно сім і вони канонічні. Дозволити моделі створювати свої
+      // означає отримати «ТалантХаб» як відділення — саме це й сталось на аудиті,
+      // коли вона обходила вимогу вказати номер.
+      if (unitType === 'DIVISION') {
+        throw new Error(
+          'Відділення створювати не можна: їх рівно сім і вони однакові для всіх компаній. '
+          + 'Заводь посаду (type=POST) і вкажи divisionBoardNo — відділення підставиться саме.',
+        );
+      }
+
       let parentId = args?.parentId ? String(args.parentId) : null;
       const boardNo = Number(args?.divisionBoardNo) || 0;
       if (!parentId && boardNo >= 1 && boardNo <= 7) {
-        const div = await prisma.orgUnit.findFirst({
-          where: { companyId: ctx.companyId, type: 'DIVISION', boardNo },
-          select: { id: true },
-        });
-        if (div) parentId = div.id;
+        parentId = await ensureDivision(ctx.companyId, boardNo);
       }
 
       // Посада без відділення «зависає», і її інструкція мовчки лягає в
       // адміністративне. Модель це поле пропускає, бо в JSON Schema воно
       // необовʼязкове — тож відмовляємо явно й пояснюємо, що вибрати.
       // Помилка з підказкою надійніша за опис у схемі: модель одразу виправляється.
-      if ((args?.type || 'POST') === 'POST' && !parentId) {
+      if (unitType === 'POST' && !parentId) {
         throw new Error(
           'Для посади потрібно вказати divisionBoardNo — до якого з семи відділень вона належить. '
           + '1 — побудова (персонал, процеси, найм у свою команду); 2 — поширення (маркетинг, продажі); '
