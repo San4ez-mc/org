@@ -70,10 +70,15 @@ export async function publishStructureToDrive(companyId: string): Promise<Publis
 
   const units = await prisma.orgUnit.findMany({
     where: { companyId },
-    select: { id: true, parentId: true, type: true, name: true, ckp: true, boardNo: true, holderName: true },
+    select: {
+      id: true, parentId: true, type: true, name: true, ckp: true, boardNo: true,
+      holderName: true, unitStatus: true,
+    },
   });
   const byId = new Map(units.map((u) => [u.id, u]));
-  const posts = units.filter((u) => u.type === 'POST');
+  // Посаду, яку виводять, не публікуємо: її документ уже поїхав в «Архів», і
+  // створювати його заново означало б воскрешати посаду щоразу при публікації.
+  const posts = units.filter((u) => u.type === 'POST' && u.unitStatus !== 'DEPRECATED');
 
   const members = await prisma.member.findMany({
     where: { companyId },

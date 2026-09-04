@@ -84,11 +84,11 @@ export async function generateInstructions(companyId: string): Promise<GenerateR
     where: { companyId },
     select: {
       id: true, parentId: true, type: true, name: true, ckp: true, boardNo: true,
-      holderName: true, reportsToUnitId: true,
+      holderName: true, reportsToUnitId: true, unitStatus: true,
     },
   });
   const byId = new Map(units.map((u) => [u.id, u]));
-  const posts = units.filter((u) => u.type === 'POST');
+  const posts = units.filter((u) => u.type === 'POST' && u.unitStatus !== 'DEPRECATED');
   const processes = await prisma.process.findMany({
     where: { companyId },
     select: { name: true, description: true, steps: true },
