@@ -89,9 +89,20 @@ export async function generateInstructions(companyId: string): Promise<GenerateR
   });
   const byId = new Map(units.map((u) => [u.id, u]));
   const posts = units.filter((u) => u.type === 'POST' && u.unitStatus !== 'DEPRECATED');
-  const processes = await prisma.process.findMany({
+  const allProcesses = await prisma.process.findMany({
     where: { companyId },
-    select: { name: true, description: true, steps: true },
+    select: { name: true, description: true, steps: true, updatedAt: true },
+    orderBy: { updatedAt: 'desc' },
+  });
+  // Один процес, описаний двічі, не робить інструкцію повнішою — він робить її
+  // суперечливою: у посади зʼявляються два різні набори кроків для однієї роботи.
+  // Береться найсвіжіший опис: він відображає те, як працюють зараз.
+  const seenProcess = new Set<string>();
+  const processes = allProcesses.filter((x) => {
+    const key = x.name.trim().toLowerCase();
+    if (seenProcess.has(key)) return false;
+    seenProcess.add(key);
+    return true;
   });
 
   const allPosts = posts.map((p) => p.name).join(', ');
