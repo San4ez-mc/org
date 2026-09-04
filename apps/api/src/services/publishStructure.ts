@@ -157,9 +157,12 @@ export async function publishStructureToDrive(companyId: string): Promise<Publis
     // переносимо в «Архів»: зворотно й видно, що сталось.
     const liveDocIds = new Set(docByPostId.values());
     const archiveFolder = await ensureFolder(regulationsRootId, 'Архів');
+    // Обхід теки рекурсивний, тож він заходить і в сам «Архів». Без цього кроку
+    // публікація щоразу «архівувала» вже заархівоване і рапортувала про це.
+    const alreadyArchived = new Set((await listFolderFiles(archiveFolder)).map((f) => f.id));
     for (const f of await listFolderFiles(regulationsRootId)) {
       if (!/ — Інструкція$/.test(f.name)) continue;
-      if (liveDocIds.has(f.id)) continue;
+      if (liveDocIds.has(f.id) || alreadyArchived.has(f.id)) continue;
       await moveFile(f.id, archiveFolder);
       archived.push(f.name);
     }
