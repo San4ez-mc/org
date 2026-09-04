@@ -332,6 +332,23 @@ async function ensureDepartment(
   return created.id;
 }
 
+/**
+ * Наявна одиниця з такою ж назвою. Тезки трапляються («Керівник відділу» у двох
+ * відділах), тому за наявності кількох беремо ту, де та сама людина.
+ */
+async function findUnitByName(
+  companyId: string,
+  name: string,
+  type: string,
+): Promise<{ id: string } | null> {
+  const found = await prisma.orgUnit.findMany({
+    where: { companyId, type: type as any, name: { equals: name, mode: 'insensitive' } },
+    select: { id: true, holderName: true },
+  });
+  if (!found.length) return null;
+  return found[0];
+}
+
 /** Знайти посаду за назвою в межах компанії — модель оперує назвами, не id. */
 async function resolveReportsTo(companyId: string, name: unknown): Promise<string | null> {
   const q = String(name ?? '').trim();
@@ -452,6 +469,25 @@ async function callTool(name: string, args: any, ctx: Ctx): Promise<unknown> {
         );
       }
 
+      // Асистент не тримає id у голові й не читає структуру перед записом — він
+      // просто називає посаду. Без пошуку за назвою кожне повторне інтервʼю
+      // подвоювало штат: після другого проходу «Ресерчер» був у базі двічі.
+      const twin = await findUnitByName(ctx.companyId, unitName, unitType);
+      if (twin) {
+        const updated = await prisma.orgUnit.update({
+          where: { id: twin.id },
+          data: {
+            ...(args?.ckp !== undefined && { ckp: args.ckp || null }),
+            ...(args?.holderName !== undefined && { holderName: holder || null, isVacant: !holder }),
+            ...(args?.reportsTo !== undefined && {
+              reportsToUnitId: await resolveReportsTo(ctx.companyId, args.reportsTo),
+            }),
+          },
+          select: { id: true, name: true, type: true, holderName: true },
+        });
+        return { ok: true, mode: 'update', unit: updated };
+      }
+
       let parentId = args?.parentId ? String(args.parentId) : null;
       const boardNo = Number(args?.divisionBoardNo) || 0;
       if (!parentId && boardNo >= 1 && boardNo <= 7) {
@@ -529,6 +565,18 @@ async function callTool(name: string, args: any, ctx: Ctx): Promise<unknown> {
       if (args?.id) {
         const updated = await prisma.process.update({
           where: { id: String(args.id) }, data, select: { id: true, name: true },
+        });
+        return { ok: true, mode: 'update', process: updated };
+      }
+      // Той самий процес, описаний удруге, має уточнити наявний, а не лягти поруч:
+      // дві «Основний рекрутинговий процес» у списку — це не історія змін, це сміття.
+      const same = await prisma.process.findFirst({
+        where: { companyId: ctx.companyId, name: { equals: procName, mode: 'insensitive' } },
+        select: { id: true },
+      });
+      if (same) {
+        const updated = await prisma.process.update({
+          where: { id: same.id }, data, select: { id: true, name: true },
         });
         return { ok: true, mode: 'update', process: updated };
       }
