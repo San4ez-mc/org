@@ -149,6 +149,7 @@ model OrgUnit {
   name      String
   ckp       String? // Цінний Кінцевий Продукт
   boardNo   Int? // номер на борду (відділення 1..7 / відділ 1..21)
+  origin    String? // звідки взявся відділ: CANONICAL / TYPICAL / CUSTOM (придумав бот)
   orderNo   Int? // порядок серед сиблінгів
 
   // Поля посади (type = POST)

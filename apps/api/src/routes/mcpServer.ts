@@ -316,6 +316,8 @@ async function ensureDepartment(
   companyId: string,
   divisionId: string | null,
   name: string,
+  ckp: string | null,
+  origin: string | null,
 ): Promise<string | null> {
   if (!divisionId) return null;
   const found = await prisma.orgUnit.findFirst({
@@ -324,7 +326,7 @@ async function ensureDepartment(
   });
   if (found) return found.id;
   const created = await prisma.orgUnit.create({
-    data: { companyId, type: 'DEPARTMENT', name, parentId: divisionId },
+    data: { companyId, type: 'DEPARTMENT', name, parentId: divisionId, ckp, origin },
     select: { id: true },
   });
   return created.id;
@@ -464,11 +466,14 @@ async function callTool(name: string, args: any, ctx: Ctx): Promise<unknown> {
         const guess = await classifyPostDivision(ctx.companyId, unitName, args?.ckp);
         const divisionId = await ensureDivision(ctx.companyId, guess.boardNo);
         parentId = guess.departmentName
-          ? await ensureDepartment(ctx.companyId, divisionId, guess.departmentName)
+          ? await ensureDepartment(
+            ctx.companyId, divisionId, guess.departmentName, guess.departmentCkp, guess.departmentOrigin,
+          )
           : divisionId;
         placement = `${guess.boardNo}. ${guess.divisionName}`
-          + (guess.departmentName ? ` → ${guess.departmentName}` : '')
-          + ` (${guess.reason})`;
+          + (guess.departmentName ? ` → ${guess.departmentName}` : ' (без відділу)')
+          + ` (${guess.reason})`
+          + (guess.departmentRejected ? ` Відділ не заводили: ${guess.departmentRejected}` : '');
       }
 
       // Підпорядкування модель називає словами («звітує Засновниці»), а в базі це
