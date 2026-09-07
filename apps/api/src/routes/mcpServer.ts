@@ -136,6 +136,13 @@ const TOOLS = [
         },
         type: { type: 'string', enum: ['DIVISION', 'DEPARTMENT', 'SECTION', 'POST'] },
         parentId: { type: 'string', description: 'Батьківська одиниця; для відділення пропусти' },
+        parentName: {
+          type: 'string',
+          description:
+            'Назва відділу або секції, всередині якої це стоїть («Відділ виробництва»). '
+            + 'Для секції обовʼязково. Для посади — лише якщо клієнт прямо сказав, де вона; '
+            + 'інакше пропусти, платформа визначить сама.',
+        },
         ckp: { type: 'string', description: 'Цінний кінцевий продукт' },
         holderName: {
           type: 'string',
@@ -530,6 +537,35 @@ async function callTool(name: string, args: any, ctx: Ctx): Promise<unknown> {
       }
 
       let parentId = args?.parentId ? String(args.parentId) : null;
+
+      // Батька модель називає словами — id вона не знає й не має знати.
+      if (!parentId && args?.parentName) {
+        const parent = await prisma.orgUnit.findFirst({
+          where: {
+            companyId: ctx.companyId,
+            type: { in: ['DEPARTMENT', 'SECTION'] },
+            name: { contains: String(args.parentName).trim(), mode: 'insensitive' },
+          },
+          select: { id: true },
+        });
+        if (!parent) {
+          throw new Error(
+            `Підрозділу «${args.parentName}» у компанії немає. Заведи спершу його, `
+            + 'або пропусти parentName — тоді посада ляже прямо на відділення.',
+          );
+        }
+        parentId = parent.id;
+      }
+
+      // Секція живе всередині відділу і ніде більше: секція, підвішена на
+      // відділення, — це відділ, просто названий іншим словом.
+      if (unitType === 'SECTION' && !parentId) {
+        throw new Error(
+          'Секцію можна заводити тільки всередині відділу — вкажи parentName '
+          + 'з назвою відділу. Якщо відділу ще немає, це не секція, а відділ.',
+        );
+      }
+
       const boardNo = Number(args?.divisionBoardNo) || 0;
       if (!parentId && boardNo >= 1 && boardNo <= 7) {
         parentId = await ensureDivision(ctx.companyId, boardNo);

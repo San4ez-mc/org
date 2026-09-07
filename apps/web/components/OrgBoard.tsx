@@ -291,6 +291,7 @@ export default function OrgBoard({ units, members, companyId, statistics = [], c
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                       {depts.map((dep) => {
                         const dPosts = childrenOf(dep.id, 'POST');
+                        const sections = childrenOf(dep.id, 'SECTION');
                         return (
                           <div key={dep.id} style={{ display: 'flex', alignItems: 'flex-start' }}>
                             <div style={{ width: 16, height: 1.5, background: LINE, marginTop: 13, flex: '0 0 16px' }} />
@@ -298,6 +299,30 @@ export default function OrgBoard({ units, members, companyId, statistics = [], c
                               <Editable companyId={companyId} unitId={dep.id} field="name" value={dep.name} />
                               <Editable companyId={companyId} unitId={dep.id} field="ckp" value={dep.ckp ?? ''} prefix="ЦКП: " small />
                               {statOf(dep.id) && <Sparkline stat={statOf(dep.id)!} />}
+
+                              {/* Секції — третій рівень. Своя спина, тонша: інакше
+                                  на вузькій колонці рівні зливаються в одну кашу. */}
+                              {sections.length > 0 && (
+                                <div style={{ position: 'relative', marginTop: 6 }}>
+                                  <div style={{ position: 'absolute', left: 5, top: -6, bottom: 14, width: 1, background: LINE }} />
+                                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                                    {sections.map((sec) => (
+                                      <div key={sec.id} style={{ display: 'flex', alignItems: 'flex-start' }}>
+                                        <div style={{ width: 12, height: 1, background: LINE, marginTop: 10, flex: '0 0 12px' }} />
+                                        <div {...dropProps(sec.id)} style={{ flex: 1, minWidth: 0, background: 'hsl(var(--card))', border: `1px solid ${dropTarget === sec.id ? 'hsl(var(--primary))' : 'hsl(var(--border))'}`, borderRadius: 6, padding: 6 }}>
+                                          <Editable companyId={companyId} unitId={sec.id} field="name" value={sec.name} />
+                                          <Editable companyId={companyId} unitId={sec.id} field="ckp" value={sec.ckp ?? ''} prefix="ЦКП: " small />
+                                          <div style={{ marginTop: 3 }}>
+                                            {childrenOf(sec.id, 'POST').map((p) => <PostChip key={p.id} p={p} />)}
+                                            <AddPost parentId={sec.id} />
+                                          </div>
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+
                               <div style={{ marginTop: 4 }}>
                                 {dPosts.map((p) => <PostChip key={p.id} p={p} />)}
                                 <AddPost parentId={dep.id} />
