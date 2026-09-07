@@ -97,6 +97,23 @@ const TOOLS = [
     },
   },
   {
+    name: 'company_upsert',
+    domain: 'org',
+    description:
+      'Зберегти, ЧИМ ЗАЙМАЄТЬСЯ компанія і який її ЦКП. Виклич одразу після того, як '
+      + 'клієнт це розповів, ще до посад. Від цього залежить, куди платформа віднесе '
+      + 'кожну посаду: без опису «рекрутер» у кадровій агенції виглядає як кадровик, '
+      + 'а не як виробництво.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        mission: { type: 'string', description: 'Чим займається компанія: що продає, кому, у чому цінність. Одне-два речення.' },
+        companyCkp: { type: 'string', description: 'ЦКП компанії — результат-іменник, за який платить клієнт.' },
+        idealPicture: { type: 'string', description: 'Якою клієнт хоче бачити компанію за рік-два. Необовязково.' },
+      },
+    },
+  },
+  {
     name: 'org_structure_read',
     domain: 'org',
     description: 'Орг-структура компанії: відділення, відділи, посади і хто їх обіймає. Без аргументів повертає все дерево.',
@@ -416,6 +433,21 @@ async function callTool(name: string, args: any, ctx: Ctx): Promise<unknown> {
       const range = `'${sheet.sheetTitle.replace(/'/g, "''")}'!A1`;
       await appendSheetValues(sheetId, [values], range);
       return { ok: true, mode: 'append' };
+    }
+
+    case 'company_upsert': {
+      const data: Record<string, string> = {};
+      for (const f of ['mission', 'companyCkp', 'idealPicture'] as const) {
+        const v = String(args?.[f] ?? '').trim();
+        if (v) data[f] = v;
+      }
+      if (!Object.keys(data).length) throw new Error('Нічого зберігати: вкажи mission або companyCkp');
+      const saved = await prisma.company.update({
+        where: { id: ctx.companyId },
+        data,
+        select: { name: true, mission: true, companyCkp: true },
+      });
+      return { ok: true, company: saved };
     }
 
     case 'org_structure_read': {
