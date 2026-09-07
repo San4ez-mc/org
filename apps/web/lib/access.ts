@@ -18,6 +18,10 @@ export interface Access {
   companyIds: string[];
   /** Дозволені сторінки; порожньо = усі базові. */
   pageIds: string[];
+  /** Звідки права: 'sso' перепитуємо, 'password' — вхід власника, перепитувати нема в кого. */
+  src?: 'sso' | 'password';
+  /** Коли куку виписали — щоб знати, наскільки застарів знімок прав. */
+  iat?: number;
   exp: number;
 }
 
@@ -39,8 +43,9 @@ function sign(payload: string): string {
   return createHmac('sha256', secret()).update(payload).digest('base64url');
 }
 
-export function encodeAccess(access: Omit<Access, 'exp'>): string {
-  const body = Buffer.from(JSON.stringify({ ...access, exp: Math.floor(Date.now() / 1000) + TTL_SECONDS })).toString('base64url');
+export function encodeAccess(access: Omit<Access, 'exp' | 'iat'>): string {
+  const now = Math.floor(Date.now() / 1000);
+  const body = Buffer.from(JSON.stringify({ ...access, iat: now, exp: now + TTL_SECONDS })).toString('base64url');
   return `${body}.${sign(body)}`;
 }
 
@@ -66,9 +71,85 @@ export function decodeAccess(raw: string | undefined): Access | null {
 export const ACCESS_COOKIE = COOKIE;
 export const ACCESS_MAX_AGE = TTL_SECONDS;
 
-/** Права поточного користувача. `null` — сесії немає або підпис не збігся. */
-export function currentAccess(): Access | null {
-  return decodeAccess(cookies().get(COOKIE)?.value);
+/**
+ * Скільки права живуть без перепиту в SSO.
+ *
+ * Кука сама по собі живе 30 днів, і цього досить для ВИДАЧІ доступу. Для ВІДКЛИКАННЯ
+ * не досить: закритий у панелі доступ ще місяць працював би. Тому права — знімок,
+ * який протухає за пʼять хвилин, після чого їх перепитуємо в SSO.
+ */
+const RIGHTS_TTL_MS = Number(process.env.ORG_RIGHTS_TTL_SECONDS || 300) * 1000;
+
+/**
+ * Скільки терпимо, коли SSO не відповідає.
+ *
+ * Падати одразу не можна — коротка недоступність SSO вимикала б усім роботу.
+ * Але й вічно вірити старому знімку не можна, бо тоді відкликання знову не працює.
+ * Тож поки SSO мовчить, працюємо за старими правами, але не довше цього строку.
+ */
+const STALE_LIMIT_MS = 6 * 60 * 60 * 1000;
+
+type Rights = Pick<Access, 'role' | 'companyIds' | 'pageIds'>;
+const rightsCache = new Map<string, { rights: Rights; at: number }>();
+
+async function fetchRights(userId: string): Promise<Rights | null> {
+  const sso = process.env.SSO_URL;
+  const clientId = process.env.ORG_SSO_CLIENT_ID;
+  const clientSecret = process.env.ORG_SSO_CLIENT_SECRET;
+  if (!sso || !clientId || !clientSecret) return null;
+  try {
+    const res = await fetch(`${sso}/oauth/permissions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ client_id: clientId, client_secret: clientSecret, userId, product: 'org' }),
+      cache: 'no-store',
+    });
+    if (!res.ok) return null;
+    const p = (await res.json()) as { role?: string; projectIds?: string[]; pageIds?: string[] };
+    return {
+      role: p.role === 'superadmin' ? 'superadmin' : p.role === 'user' ? 'user' : 'none',
+      companyIds: Array.isArray(p.projectIds) ? p.projectIds : [],
+      pageIds: Array.isArray(p.pageIds) ? p.pageIds : [],
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Права поточного користувача. `null` — сесії немає або підпис не збігся.
+ *
+ * Особу бере з підписаної куки (її не підробити), а права — свіжі з SSO. Кеш на
+ * пʼять хвилин, щоб не ходити в SSO на кожен рендер.
+ */
+export async function currentAccess(): Promise<Access | null> {
+  const access = decodeAccess(cookies().get(COOKIE)?.value);
+  if (!access) return null;
+
+  // Вхід власника за майстер-паролем: такого користувача в SSO немає, перепитувати нема в кого.
+  if (access.src === 'password' || !access.userId || access.userId === 'owner') return access;
+
+  const hit = rightsCache.get(access.userId);
+  if (hit && Date.now() - hit.at < RIGHTS_TTL_MS) return { ...access, ...hit.rights };
+
+  const fresh = await fetchRights(access.userId);
+  if (fresh) {
+    rightsCache.set(access.userId, { rights: fresh, at: Date.now() });
+    return { ...access, ...fresh };
+  }
+
+  // SSO мовчить. Працюємо за знімком із куки, але лише поки він не надто старий.
+  const issued = (access.iat ?? 0) * 1000;
+  if (issued && Date.now() - issued > STALE_LIMIT_MS) {
+    return { ...access, role: 'none', companyIds: [], pageIds: [] };
+  }
+  return access;
+}
+
+/** Забути кешовані права — після зміни доступів, щоб не чекати пʼять хвилин. */
+export function forgetRights(userId?: string): void {
+  if (userId) rightsCache.delete(userId);
+  else rightsCache.clear();
 }
 
 /** Чи видно користувачу цю компанію. */
@@ -105,7 +186,9 @@ export function displayUser(): { name: string; email: string } | null {
     if (!v) return '';
     try { return decodeURIComponent(v); } catch { return v; }
   };
-  const email = currentAccess()?.email || read('org_user');
+  // Навмисно без перепиту в SSO: тут потрібне лише імʼя для показу, а ходити
+  // по мережі заради підпису в шапці — зайве.
+  const email = decodeAccess(jar.get(COOKIE)?.value)?.email || read('org_user');
   const name = read('org_user_name');
   if (!email && !name) return null;
   return { name, email };

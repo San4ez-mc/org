@@ -41,7 +41,7 @@ export async function GET(req: NextRequest) {
 
     // Права з SSO. Без них користувач не побачить нічого: `org_session` лишається
     // спільним для всіх, тож саме ця кука вирішує, чиї компанії видно.
-    let access = { userId: '', email: '', role: 'none' as 'superadmin' | 'user' | 'none', companyIds: [] as string[], pageIds: [] as string[] };
+    let access = { userId: '', email: '', role: 'none' as 'superadmin' | 'user' | 'none', companyIds: [] as string[], pageIds: [] as string[], src: 'sso' as const };
     if (data.user?.id) {
       try {
         const permRes = await fetch(`${sso}/oauth/permissions`, {
@@ -58,6 +58,7 @@ export async function GET(req: NextRequest) {
             role: p.role === 'superadmin' ? 'superadmin' : p.role === 'user' ? 'user' : 'none',
             companyIds: Array.isArray(p.projectIds) ? p.projectIds : [],
             pageIds: Array.isArray(p.pageIds) ? p.pageIds : [],
+            src: 'sso' as const,
           };
         } else {
           console.error('[sso callback] права не отримані', permRes.status);

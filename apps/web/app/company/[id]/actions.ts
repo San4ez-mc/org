@@ -18,7 +18,7 @@ const COMPANY_PATH = /^\/companies\/([0-9a-f-]{36})(\/|$)/i;
 
 async function call(path: string, method: string, body?: unknown) {
   const scoped = COMPANY_PATH.exec(path);
-  if (scoped && !canSeeCompany(currentAccess(), scoped[1])) {
+  if (scoped && !canSeeCompany(await currentAccess(), scoped[1])) {
     throw new Error('Немає доступу до цієї компанії');
   }
   const res = await fetch(`${BASE}${path}`, {

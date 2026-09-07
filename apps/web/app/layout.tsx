@@ -14,7 +14,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
   // layout тягне дані сам, тож фільтрувати треба і тут.
   let companies: Company[] = [];
   try {
-    companies = visibleCompanies(currentAccess(), await getCompanies());
+    companies = visibleCompanies(await currentAccess(), await getCompanies());
   } catch {
     companies = [];
   }

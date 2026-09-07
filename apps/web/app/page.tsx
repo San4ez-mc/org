@@ -5,7 +5,7 @@ import { currentAccess, visibleCompanies } from '@/lib/access';
 export const dynamic = 'force-dynamic';
 
 export default async function CompaniesPage() {
-  const access = currentAccess();
+  const access = await currentAccess();
   let companies;
   try {
     // Фільтруємо на сервері: віддавати клієнту повний список і ховати зайве

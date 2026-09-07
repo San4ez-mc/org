@@ -11,13 +11,13 @@ import { canSeeCompany, currentAccess } from '@/lib/access';
  * Віддаємо 404, а не 403: інакше сама відповідь підтверджувала б, що компанія з таким
  * id існує, і чужий перелік можна було б відновити перебором.
  */
-export default function CompanyLayout({
+export default async function CompanyLayout({
   children,
   params,
 }: {
   children: React.ReactNode;
   params: { id: string };
 }) {
-  if (!canSeeCompany(currentAccess(), params.id)) notFound();
+  if (!canSeeCompany(await currentAccess(), params.id)) notFound();
   return <>{children}</>;
 }

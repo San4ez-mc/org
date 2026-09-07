@@ -16,7 +16,7 @@ export async function login(formData: FormData) {
     // Вхід користувачів іде через SSO, де права беруться з їхньої картки доступів.
     cookies().set(
       ACCESS_COOKIE,
-      encodeAccess({ userId: 'owner', email: 'owner', role: 'superadmin', companyIds: [], pageIds: [] }),
+      encodeAccess({ userId: 'owner', email: 'owner', role: 'superadmin', companyIds: [], pageIds: [], src: 'password' }),
       { httpOnly: true, sameSite: 'lax', path: '/', maxAge: ACCESS_MAX_AGE },
     );
     redirect('/');
