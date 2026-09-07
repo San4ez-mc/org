@@ -169,7 +169,10 @@ export async function generateInstructions(companyId: string): Promise<GenerateR
         .replace(/```(?:markdown)?/gi, '')
         .replace(/^\s*#{1,3}\s*Посадова інструкція[^\n]*\n+/i, '')
         .trim();
-      const clean = `# Посадова інструкція — ${post.name}\n\n${body}`;
+      // Рівень заголовків нормалізуємо: модель пише розділи то «##», то «###»,
+      // і при тому самому шаблоні документи виходять з різним розміром розділів.
+      const leveled = body.replace(/^#{2,4}\s+/gm, '## ');
+      const clean = `# Посадова інструкція — ${post.name}\n\n${leveled}`;
       const r = await writeFile('', `${post.name} — Інструкція`, clean, docId, { markdown: true });
       generated.push({ post: post.name, url: r.webViewLink, chars: clean.length });
     }
