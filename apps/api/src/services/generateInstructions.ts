@@ -1,6 +1,6 @@
 import { prisma } from '@platform/db';
 import { writeFile, ensureInstructionOriginal } from '@platform/drive';
-import { instructionSpecForPrompt } from '@platform/org-template';
+import { instructionSpecForPrompt, CANONICAL_DIVISIONS } from '@platform/org-template';
 import { flowsGenerate } from './vector';
 import { withCompanyDrive } from './driveScope';
 
@@ -116,7 +116,14 @@ export async function generateInstructions(companyId: string): Promise<GenerateR
         company.mission ? `Чим займається компанія: ${company.mission}` : '',
         company.companyCkp ? `ЦКП компанії: ${company.companyCkp}` : '',
         post.ckp ? `ЦКП посади (основа першого розділу): ${post.ckp}` : '',
-        (() => { const d = byId.get(post.parentId ?? ''); return d ? `Підрозділ: ${d.name}` : ''; })(),
+        // Відділення передаємо явно: коли його немає в даних, модель дописує
+        // рядок сама і ставить туди назву компанії — «Відділення: Digital Hiring».
+        (() => {
+          const { boardNo, deptName } = divisionOf(post.parentId, byId);
+          const div = CANONICAL_DIVISIONS.find((d) => d.boardNo === boardNo);
+          return `Відділення: ${boardNo}. ${div?.name ?? ''}` + (deptName ? `
+Відділ: ${deptName}` : '');
+        })(),
         (() => { const b = post.reportsToUnitId ? byId.get(post.reportsToUnitId) : null; return b ? `Підпорядковується: ${b.name}${b.holderName ? ` (${b.holderName})` : ''}` : ''; })(),
         post.holderName ? `Зараз обіймає: ${post.holderName}` : 'Посада вакантна.',
         `Інші посади в компанії: ${allPosts}`,

@@ -310,8 +310,37 @@ function normalizeSteps(steps: unknown): unknown {
   return steps.map((s) => {
     if (!s || typeof s !== 'object') return s;
     const { post, postTitle, ...rest } = s as Record<string, unknown>;
-    return { ...rest, postTitle: postTitle ?? post ?? '' };
+    // Модель пише виконавця так, як говорять: «Богдан (джуніор рекрутер)».
+    // Ім'я відрізаємо: крок належить ПОСАДІ, і при зміні людини він має лишитись.
+    let who = String(postTitle ?? post ?? '').trim();
+    const inParens = who.match(/^[^(]*\(([^)]+)\)\s*$/);
+    if (inParens) who = inParens[1].trim();
+    return { ...rest, postTitle: who };
   });
+}
+
+/**
+ * Кроки, чий виконавець не збігається з жодною посадою в структурі.
+ *
+ * Мовчазний розрив: у структурі «Молодший ресерчер», у кроці «джуніор рекрутер» —
+ * і розділ «що робить покроково» в його інструкції виходить порожнім, хоча процес
+ * описаний. Тому не мовчимо, а повертаємо моделі список неспівпадінь: вона одразу
+ * бачить, які назви існують насправді, і виправляє.
+ */
+async function unmatchedStepPosts(companyId: string, steps: unknown): Promise<string[]> {
+  if (!Array.isArray(steps) || !steps.length) return [];
+  const posts = await prisma.orgUnit.findMany({
+    where: { companyId, type: 'POST' },
+    select: { name: true },
+  });
+  const names = posts.map((p) => p.name.toLowerCase());
+  const bad = new Set<string>();
+  for (const s of steps as { postTitle?: string }[]) {
+    const who = String(s?.postTitle ?? '').trim().toLowerCase();
+    if (!who) continue;
+    if (!names.some((n) => n && (who.includes(n) || n.includes(who)))) bad.add(String(s.postTitle));
+  }
+  return [...bad];
 }
 
 /**
@@ -651,16 +680,26 @@ async function callTool(name: string, args: any, ctx: Ctx): Promise<unknown> {
         where: { companyId: ctx.companyId, name: { equals: procName, mode: 'insensitive' } },
         select: { id: true },
       });
+      const unmatched = await unmatchedStepPosts(ctx.companyId, data.steps);
+      const warn = unmatched.length
+        ? {
+          warning:
+            `Ці виконавці кроків не збігаються з жодною посадою: ${unmatched.join(', ')}. `
+            + 'Або заведи такі посади, або перепиши кроки під наявні назви — інакше в '
+            + 'їхніх інструкціях розділ «що робить покроково» лишиться порожнім.',
+        }
+        : {};
+
       if (same) {
         const updated = await prisma.process.update({
           where: { id: same.id }, data, select: { id: true, name: true },
         });
-        return { ok: true, mode: 'update', process: updated };
+        return { ok: true, mode: 'update', process: updated, ...warn };
       }
       const created = await prisma.process.create({
         data: { ...data, companyId: ctx.companyId }, select: { id: true, name: true },
       });
-      return { ok: true, mode: 'create', process: created };
+      return { ok: true, mode: 'create', process: created, ...warn };
     }
 
     case 'generate_instructions':
