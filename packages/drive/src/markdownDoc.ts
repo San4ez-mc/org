@@ -82,10 +82,6 @@ export function markdownToDoc(markdown: string, startIndex = 1): DocContent {
     .split('\n')
     .map(parseLine);
 
-  // Перший заголовок у документі — його назва, і вона має виглядати як назва.
-  const firstHeading = lines.findIndex((l) => l.heading > 0);
-  if (firstHeading >= 0) lines[firstHeading].heading = 1;
-
   const plain = lines.map((l) => l.text).join('\n') + '\n';
 
   const requests: unknown[] = [];
