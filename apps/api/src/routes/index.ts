@@ -5,6 +5,12 @@ import { findFolderByName, listFolderTree, listFolderFiles, readFileText, ensure
   buildSkeletonInFolder,
 } from '@platform/drive';
 import { stepsToMermaid } from '@platform/ai';
+
+/** Процес із порахованою діаграмою. Зберігати її в базі означає гарантовано розійтись. */
+function withDiagram<T extends { steps: unknown }>(p: T): T & { diagram: string } {
+  const steps = Array.isArray(p.steps) ? (p.steps as { postTitle: string; action: string; result: string }[]) : [];
+  return { ...p, diagram: stepsToMermaid(steps) };
+}
 import { requireApiSecret } from '../middleware/auth';
 import { handleAct } from '../services/agent';
 import { indexInstruction, findRelatedInstructions, indexDriveDocuments, vectorEnabled, createSubToken, listVectorTokens, deleteVectorToken, vectorSearch, flowsGenerate } from '../services/vector';
@@ -233,7 +239,10 @@ api.get('/companies/:id', async (req, res) => {
       res.status(404).json({ error: 'Компанію не знайдено' });
       return;
     }
-    res.json({ company });
+    // Діаграма — не дані, а вигляд даних: рахуємо з кроків на кожному читанні.
+    // Поки вона зберігалась, її перегенеровував лише REST-роут; асистент пише через
+    // MCP, і в усіх його процесів діаграми просто не було.
+    res.json({ company: { ...company, processes: company.processes.map(withDiagram) } });
   } catch (err) {
     res.status(500).json({ error: String(err) });
   }
@@ -1420,7 +1429,7 @@ api.post('/companies/:id/processes', async (req, res) => {
   try {
     const { name } = req.body ?? {};
     const process = await prisma.process.create({
-      data: { companyId: req.params.id, name: name || 'Новий процес', description: '', steps: [], diagram: null },
+      data: { companyId: req.params.id, name: name || 'Новий процес', description: '', steps: [] },
     });
     await logChange(req.params.id, 'process', 'create', `Створено процес: ${process.name}`, req.body?.author);
     res.json({ process });
@@ -1437,7 +1446,6 @@ api.patch('/processes/:id', async (req, res) => {
     if (description !== undefined) data.description = description;
     if (Array.isArray(steps)) {
       data.steps = steps;
-      data.diagram = stepsToMermaid(steps); // перегенерувати діаграму з кроків
     }
     if (graph !== undefined) data.graph = graph; // візуальна схема (React Flow)
     const process = await prisma.process.update({ where: { id: req.params.id }, data });
@@ -1612,7 +1620,7 @@ api.get('/companies/:id/health', async (req, res) => {
       }),
       prisma.process.findMany({
         where: { companyId },
-        select: { id: true, name: true, steps: true, diagram: true, graph: true },
+        select: { id: true, name: true, steps: true, graph: true },
         orderBy: { createdAt: 'asc' },
       }),
       prisma.member.findMany({
@@ -1628,13 +1636,11 @@ api.get('/companies/:id/health', async (req, res) => {
       .filter((p) => p.isVacant || p._count.memberPosts === 0)
       .map((p) => ({ id: p.id, name: p.name }));
 
-    const processesDescribed = processes.filter((p) => {
-      const hasSteps = Array.isArray(p.steps) && (p.steps as unknown[]).length > 0;
-      const hasDiagram = typeof p.diagram === 'string' && p.diagram.trim() !== '';
-      const g = p.graph as { nodes?: unknown[] } | null;
-      const hasGraph = !!g && Array.isArray(g.nodes) && g.nodes.length > 0;
-      return hasSteps || hasDiagram || hasGraph;
-    }).length;
+    // Описаний процес — той, у якого є кроки. Схема й діаграма з них виводяться,
+    // тож рахувати їх окремо означало б вважати описаним процес із самою назвою.
+    const processesDescribed = processes.filter(
+      (p) => Array.isArray(p.steps) && (p.steps as unknown[]).length > 0,
+    ).length;
 
     const membersWithoutPost = members
       .filter((m) => m._count.posts === 0)
@@ -1680,7 +1686,7 @@ api.get('/companies/:id/dashboard', async (req, res) => {
         where: { companyId, type: 'POST' },
         select: { id: true, name: true, ckp: true, isVacant: true, _count: { select: { memberPosts: true } } },
       }),
-      prisma.process.findMany({ where: { companyId }, select: { steps: true, diagram: true, graph: true } }),
+      prisma.process.findMany({ where: { companyId }, select: { steps: true } }),
       prisma.member.findMany({ where: { companyId }, select: { _count: { select: { posts: { where: { removedAt: null } } } } } }),
       prisma.changeLog.count({ where: { companyId, createdAt: { gte: since7 } } }),
       prisma.changeLog.count({ where: { companyId, createdAt: { gte: since30 } } }),
@@ -1694,13 +1700,9 @@ api.get('/companies/:id/dashboard', async (req, res) => {
     const postsWithoutCkp = posts.filter((p) => p.ckp === null || p.ckp.trim() === '').length;
 
     const processesTotal = processes.length;
-    const processesDescribed = processes.filter((p) => {
-      const hasSteps = Array.isArray(p.steps) && (p.steps as unknown[]).length > 0;
-      const hasDiagram = typeof p.diagram === 'string' && p.diagram.trim() !== '';
-      const g = p.graph as { nodes?: unknown[] } | null;
-      const hasGraph = !!g && Array.isArray(g.nodes) && g.nodes.length > 0;
-      return hasSteps || hasDiagram || hasGraph;
-    }).length;
+    const processesDescribed = processes.filter(
+      (p) => Array.isArray(p.steps) && (p.steps as unknown[]).length > 0,
+    ).length;
     const processesUndescribed = processesTotal - processesDescribed;
 
     const membersWithoutPost = members.filter((m) => m._count.posts === 0).length;

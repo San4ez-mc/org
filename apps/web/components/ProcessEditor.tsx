@@ -15,6 +15,9 @@ const ghost = { background: 'transparent', border: '1px solid hsl(var(--border))
 const primary = { background: 'hsl(var(--primary))', color: '#fff', border: 'none', borderRadius: 7, padding: '6px 14px', fontSize: 13, cursor: 'pointer' } as const;
 
 export default function ProcessEditor({ companyId, process, postTitles }: { companyId: string; process: Process; postTitles: string[] }) {
+  // Два вигляди одного процесу: дані і картинка. Третій — збережена mermaid-діаграма
+  // всередині списку — показував те саме, що схема, і жив окремим життям.
+  const [view, setView] = useState<'list' | 'diagram'>('list');
   const [editing, setEditing] = useState(false);
   const [canvas, setCanvas] = useState(false);
   const [name, setName] = useState(process.name);
@@ -49,23 +52,52 @@ export default function ProcessEditor({ companyId, process, postTitles }: { comp
             </>
           ) : (
             <>
-              <button style={{ ...ghost, ...(canvas ? { borderColor: 'hsl(var(--primary))', color: 'hsl(var(--primary))' } : {}) }} onClick={() => setCanvas((v) => !v)}>{canvas ? 'Сховати схему' : '◆ Схема'}</button>
-              <button style={ghost} onClick={() => setEditing(true)}>Кроки</button>
+              <div style={{ display: 'flex', border: '1px solid hsl(var(--border))', borderRadius: 7, overflow: 'hidden' }}>
+                {(['list', 'diagram'] as const).map((v) => (
+                  <button
+                    key={v}
+                    onClick={() => { setView(v); setCanvas(false); }}
+                    style={{
+                      background: view === v ? 'hsl(var(--primary))' : 'transparent',
+                      color: view === v ? '#fff' : 'hsl(var(--muted-foreground))',
+                      border: 'none', padding: '5px 12px', fontSize: 12, cursor: 'pointer',
+                    }}
+                  >{v === 'list' ? 'Список' : '◆ Схема'}</button>
+                ))}
+              </div>
+              {view === 'list' ? (
+                <button style={ghost} onClick={() => setEditing(true)}>Редагувати кроки</button>
+              ) : (
+                <button
+                  style={{ ...ghost, ...(canvas ? { borderColor: 'hsl(var(--primary))', color: 'hsl(var(--primary))' } : {}) }}
+                  onClick={() => setCanvas((v) => !v)}
+                >{canvas ? 'Готово' : 'Малювати'}</button>
+              )}
               <button style={ghost} onClick={() => { if (confirm('Видалити процес?')) start(async () => { await deleteProcess(companyId, process.id); router.push(`/company/${companyId}/processes`); }); }}>Видалити</button>
             </>
           )}
         </div>
       </div>
 
-      {canvas && <ProcessCanvas companyId={companyId} process={process} postTitles={postTitles} onClose={() => setCanvas(false)} />}
+      {view === 'diagram' && !editing && (
+        canvas
+          ? <ProcessCanvas companyId={companyId} process={process} postTitles={postTitles} onClose={() => setCanvas(false)} />
+          : (
+            <div style={{ border: '1px solid hsl(var(--border))', borderRadius: 8, padding: 12, marginTop: 12, background: 'hsl(var(--background))' }}>
+              {process.diagram
+                ? <MermaidView code={process.diagram} id={process.id} />
+                : <div style={{ ...muted, fontSize: 13 }}>Кроків ще немає — малювати нічого.</div>}
+            </div>
+          )
+      )}
 
-      {!canvas && (editing ? (
+      {(view === 'list' || editing) && (editing ? (
         <textarea style={{ ...input, marginTop: 8, minHeight: 44 }} placeholder="Опис процесу" value={description} onChange={(e) => setDescription(e.target.value)} />
       ) : (
         process.description && <div style={{ fontSize: 12.5, ...muted, margin: '6px 0 0' }}>{process.description}</div>
       ))}
 
-      {!canvas && (editing ? (
+      {(view === 'list' || editing) && (editing ? (
         <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
           {steps.map((s, i) => (
             <div key={i} style={{ ...card, padding: 8, display: 'flex', flexDirection: 'column', gap: 6, background: s.problem ? 'rgba(224,122,122,0.07)' : 'hsl(var(--background))' }}>
@@ -100,11 +132,6 @@ export default function ProcessEditor({ companyId, process, postTitles }: { comp
       ) : (
         <>
           {owner && <div style={{ fontSize: 12, ...muted, marginTop: 6 }}>відповідальний за результат: <b>{owner}</b></div>}
-          {process.diagram && (
-            <div style={{ border: '1px solid hsl(var(--border))', borderRadius: 8, padding: 12, margin: '12px 0 0', background: 'hsl(var(--background))' }}>
-              <MermaidView code={process.diagram} id={process.id} />
-            </div>
-          )}
           <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 6 }}>
             {(process.steps ?? []).map((s, i) => (
               <div key={i} style={{ display: 'grid', gridTemplateColumns: '24px 190px 1fr', gap: 10, fontSize: 13, alignItems: 'start' }}>

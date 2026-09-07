@@ -168,7 +168,6 @@ async function buildAndNotify(answers: OnboardingAnswers, ctx: AgentContext, roo
           name: pr.name,
           description: pr.description,
           steps: pr.steps as object,
-          diagram: (pr.mermaid && pr.mermaid.trim()) || stepsToMermaid(pr.steps),
         },
       });
     }

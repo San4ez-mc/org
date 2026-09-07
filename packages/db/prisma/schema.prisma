@@ -269,8 +269,10 @@ model Process {
   description String?
   ownerUnitId String?
   ownerUnit   OrgUnit? @relation("ProcessOwner", fields: [ownerUnitId], references: [id])
-  steps       Json? // впорядковані кроки процесу (лінійний підсумок)
-  diagram     String? // Mermaid-діаграма swimlane (лейни = відповідальні)
+  steps       Json? // впорядковані кроки процесу — ЄДИНЕ джерело правди
+  // Mermaid-діаграми тут навмисно немає: вона повністю виводиться з steps і
+  // рахується при читанні. Збережена копія розходилась щоразу, коли кроки
+  // писали не тим шляхом, яким її перегенеровували.
   graph       Json? // візуальна схема: { nodes: [...], edges: [...] } (React Flow, з гілками-рішеннями)
 
   createdAt DateTime @default(now())
