@@ -2,7 +2,6 @@ import { prisma } from '@platform/db';
 import {
   CANONICAL_DIVISIONS,
   DEPARTMENT_RULES,
-  CUSTOM_DEPARTMENT_MIN_POSTS,
   boardForPrompt,
   knownDepartments,
   type DepartmentOrigin,
@@ -141,8 +140,9 @@ export async function classifyPostDivision(
     return { ...base, departmentName: known.name, departmentCkp: known.ckp, departmentOrigin: known.origin };
   }
 
-  // Новий відділ. Перевіряємо те, що взагалі можна перевірити машинно: решта
-  // правил лишається на совісті моделі, але ці три ловлять типові зриви.
+  // Новий відділ заводимо одразу, щойно функція визначена: чекати, поки в ньому
+  // набереться кілька людей, означає рівно доти лишати функцію нічиєю. Перевіряємо
+  // те, що можна перевірити машинно; решта правил — на совісті моделі.
   const deptCkp = String(dept?.ckp ?? '').trim();
   if (!deptCkp) {
     return { ...base, departmentRejected: `«${deptName}» без ЦКП — відділ без результату не заводимо` };
@@ -152,18 +152,5 @@ export async function classifyPostDivision(
   if (twin) {
     return { ...base, departmentName: twin.name, departmentCkp: twin.ckp, departmentOrigin: twin.origin };
   }
-  // Відділ навколо однієї людини — це посада. Чекаємо, поки функція набере вагу.
-  const postsInDivision = await prisma.orgUnit.count({
-    where: { companyId, type: 'POST', parent: { OR: [{ boardNo, type: 'DIVISION' }, { parent: { boardNo, type: 'DIVISION' } }] } },
-  });
-  if (postsInDivision < CUSTOM_DEPARTMENT_MIN_POSTS) {
-    return {
-      ...base,
-      departmentRejected:
-        `«${deptName}» поки не заводимо: у відділенні ${postsInDivision} посад(и). `
-        + `Новий відділ має сенс від ${CUSTOM_DEPARTMENT_MIN_POSTS} — інакше це посада, а не відділ.`,
-    };
-  }
-
   return { ...base, departmentName: deptName, departmentCkp: deptCkp, departmentOrigin: 'CUSTOM' };
 }
