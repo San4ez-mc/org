@@ -2,7 +2,7 @@ import './globals.css';
 import type { ReactNode } from 'react';
 import AppShell from '@/components/AppShell';
 import { getCompanies, type Company } from '@/lib/api';
-import { currentAccess, visibleCompanies } from '@/lib/access';
+import { currentAccess, displayUser, visibleCompanies } from '@/lib/access';
 
 export const metadata = {
   title: 'Жива Орг.Платформа',
@@ -22,7 +22,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
   return (
     <html lang="uk" className="dark">
       <body>
-        <AppShell companies={companies}>{children}</AppShell>
+        <AppShell companies={companies} user={displayUser()}>{children}</AppShell>
       </body>
     </html>
   );

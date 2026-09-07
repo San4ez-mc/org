@@ -3,7 +3,13 @@ import { usePathname, useRouter } from 'next/navigation';
 import { logout } from '@/app/auth-actions';
 import type { Company } from '@/lib/api';
 
-export default function TopBar({ companies }: { companies: Company[] }) {
+export default function TopBar({
+  companies,
+  user,
+}: {
+  companies: Company[];
+  user?: { name: string; email: string } | null;
+}) {
   const path = usePathname() || '/';
   const router = useRouter();
   const m = path.match(/^\/company\/([^/]+)/);
@@ -39,6 +45,20 @@ export default function TopBar({ companies }: { companies: Company[] }) {
             <option key={c.id} value={c.id}>{c.name}</option>
           ))}
         </select>
+
+        {/* Під ким сидиш. Без цього неможливо помітити, що вкладка тримає чужу
+            сесію, — а саме так і виглядала плутанина з профілями. */}
+        {user && (
+          <span
+            title={user.email || undefined}
+            style={{
+              fontSize: 12.5, color: 'hsl(var(--muted-foreground))',
+              maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+            }}
+          >
+            {user.name || user.email}
+          </span>
+        )}
 
         <form action={logout}>
           <button

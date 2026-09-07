@@ -70,7 +70,12 @@ export async function GET(req: NextRequest) {
     }
 
     if (access.role === 'none') {
-      return NextResponse.redirect(`${base}/login?e=noaccess`);
+      // Хто саме не пройшов — найважливіше на цьому екрані: без імені адміністратор
+      // не знає, кому відкривати доступ, а користувач не знає, що зайшов не тим
+      // акаунтом. Кладемо в куку, а не в адресу: пошта в query осідає в логах.
+      const denied = NextResponse.redirect(`${base}/login?e=noaccess`);
+      setDisplayUser(denied, data.user?.email, data.user?.name);
+      return denied;
     }
 
     const res = NextResponse.redirect(`${base}/`);
@@ -88,17 +93,22 @@ export async function GET(req: NextRequest) {
       maxAge: ACCESS_MAX_AGE,
     });
     // Хто увійшов — лише для показу в інтерфейсі. Доступ дає підписана org_access.
-    if (data.user?.email) {
-      res.cookies.set('org_user', data.user.email, {
-        sameSite: 'lax',
-        path: '/',
-        maxAge: 60 * 60 * 24 * 30,
-      });
-    }
+    setDisplayUser(res, data.user?.email, data.user?.name);
     res.cookies.set('sso_state', '', { path: '/', maxAge: 0 });
     return res;
   } catch (err) {
     console.error('[sso callback] виняток (SSO недоступний?):', err);
     return NextResponse.redirect(`${base}/login?e=sso`);
   }
+}
+
+/**
+ * Пошта й імʼя для показу в інтерфейсі. Не httpOnly і не підписані навмисно: це
+ * підпис на дверях, а не ключ. Права дає тільки org_access, тож підміна цих кук
+ * у консолі браузера нічого не відкриває.
+ */
+function setDisplayUser(res: NextResponse, email?: string, name?: string): void {
+  const opts = { sameSite: 'lax' as const, path: '/', maxAge: 60 * 60 * 24 * 30 };
+  if (email) res.cookies.set('org_user', encodeURIComponent(email), opts);
+  if (name) res.cookies.set('org_user_name', encodeURIComponent(name), opts);
 }

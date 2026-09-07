@@ -28,5 +28,6 @@ export async function logout() {
   cookies().set('org_session', '', { path: '/', maxAge: 0 });
   cookies().set(ACCESS_COOKIE, '', { path: '/', maxAge: 0 });
   cookies().set('org_user', '', { path: '/', maxAge: 0 });
+  cookies().set('org_user_name', '', { path: '/', maxAge: 0 });
   redirect('/login');
 }

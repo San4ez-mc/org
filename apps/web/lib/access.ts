@@ -90,3 +90,23 @@ export function visibleCompanies<T extends { id: string }>(access: Access | null
   if (access.role === 'superadmin') return companies;
   return companies.filter((c) => access.companyIds.includes(c.id));
 }
+
+/**
+ * Хто зайшов — для показу, не для прав.
+ *
+ * Пошта береться з підписаної org_access, коли та є: там її не підмінити. На
+ * екрані відмови підписаної куки ще нема, тож лишається org_user — і це нормально,
+ * бо там ця пошта нічого не відкриває, вона лише пояснює, чому доступу нема.
+ */
+export function displayUser(): { name: string; email: string } | null {
+  const jar = cookies();
+  const read = (k: string) => {
+    const v = jar.get(k)?.value;
+    if (!v) return '';
+    try { return decodeURIComponent(v); } catch { return v; }
+  };
+  const email = currentAccess()?.email || read('org_user');
+  const name = read('org_user_name');
+  if (!email && !name) return null;
+  return { name, email };
+}

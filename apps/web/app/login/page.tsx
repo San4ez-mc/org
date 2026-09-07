@@ -1,8 +1,10 @@
 import SalesChatbot from '@/components/SalesChatbot';
+import { displayUser } from '@/lib/access';
 
 export const dynamic = 'force-dynamic';
 
 export default function LoginPage({ searchParams }: { searchParams: { e?: string } }) {
+  const who = displayUser();
   return (
     <div
       style={{
@@ -47,8 +49,15 @@ export default function LoginPage({ searchParams }: { searchParams: { e?: string
           <div style={{ fontSize: 12, color: '#f0a0a0', marginBottom: 14 }}>Не вдалося увійти через FINEKO. Спробуйте ще раз.</div>
         )}
         {searchParams.e === 'noaccess' && (
-          <div style={{ fontSize: 12, color: '#f0a0a0', marginBottom: 14 }}>
+          <div style={{ fontSize: 12, color: '#f0a0a0', marginBottom: 14, lineHeight: 1.5 }}>
             Вхід виконано, але вам ще не відкрито жодної компанії. Зверніться до адміністратора.
+            {who && (
+              <div style={{ marginTop: 8, color: 'hsl(215 20% 70%)' }}>
+                Ви зайшли як <b style={{ color: '#fff' }}>{who.name || who.email}</b>
+                {who.name && who.email ? ` · ${who.email}` : ''}
+                <div style={{ marginTop: 2 }}>Саме цьому акаунту треба відкрити доступ.</div>
+              </div>
+            )}
           </div>
         )}
         <a
