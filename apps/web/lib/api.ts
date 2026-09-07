@@ -17,6 +17,9 @@ export interface Company {
   driveIndexedAt?: string | null;
   driveIndexedCount?: number;
   orgSheetId: string | null;
+  /** Чим займається компанія і її ЦКП — асистент записує їх на першому знайомстві. */
+  mission?: string | null;
+  companyCkp?: string | null;
   createdAt: string;
 }
 

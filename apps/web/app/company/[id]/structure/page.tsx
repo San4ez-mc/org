@@ -18,7 +18,7 @@ export default async function StructurePage({ params }: { params: { id: string }
   return (
     <div>
       <CompanyHeader company={company} />
-      <OrgBoard units={company.orgUnits} members={company.members} companyId={company.id} statistics={statistics} />
+      <OrgBoard units={company.orgUnits} members={company.members} companyId={company.id} statistics={statistics} companyCkp={company.companyCkp} />
     </div>
   );
 }

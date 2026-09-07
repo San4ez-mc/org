@@ -38,7 +38,67 @@ const DIVISION_PAEI: Record<number, 'P' | 'A' | 'E' | 'I'> = { 7: 'E', 1: 'I', 2
 const BOARD_ORDER = [7, 1, 2, 3, 4, 5, 6];
 const PAEI_COLOR: Record<string, string> = { P: '#e07a7a', A: '#7a93d6', E: '#6bbf72', I: '#d6b84f' };
 
-export default function OrgBoard({ units, members, companyId, statistics = [] }: { units: OrgUnit[]; members: Member[]; companyId: string; statistics?: Statistic[] }) {
+// Верхівка борду однакова для всіх компаній: рада засновників тримає
+// адміністративне відділення, виконавчий директор — решту через трьох заступників.
+const COUNCIL = { name: 'Рада засновників', divisions: [7] };
+const CEO = { name: 'Виконавчий директор' };
+const DEPUTIES = [
+  { key: 'adm', name: 'Заступник з адміністративних питань', divisions: [1, 2, 3] },
+  { key: 'tech', name: 'Заступник з технічних питань', divisions: [4, 5] },
+  { key: 'public', name: 'Заступник по роботі з публікою', divisions: [6] },
+];
+
+// Геометрія колонок. Лінії малюємо в SVG за обчисленими центрами: підганяти
+// з'єднання псевдоелементами на вкладених флексах — це щоразу нова халепа
+// при зміні висоти картки, а тут координати не залежать від вмісту.
+const COL_W = 250;
+const COL_GAP = 14;
+const BOARD_W = BOARD_ORDER.length * COL_W + (BOARD_ORDER.length - 1) * COL_GAP;
+const colX = (i: number) => i * (COL_W + COL_GAP) + COL_W / 2;
+const colOf = (boardNo: number) => BOARD_ORDER.indexOf(boardNo);
+/** Центр групи колонок — над ними стоїть керівник. */
+const groupX = (nos: number[]) => {
+  const xs = nos.map((n) => colX(colOf(n))).filter((x) => x >= COL_W / 2);
+  return xs.length ? (Math.min(...xs) + Math.max(...xs)) / 2 : 0;
+};
+
+const LINE = 'hsl(var(--border))';
+
+/** Вертикальний відрізок від keeper вниз і горизонтальна планка до дітей. */
+function Connectors({ from, to, height }: { from: number; to: number[]; height: number }) {
+  if (!to.length) return null;
+  const mid = height / 2;
+  const left = Math.min(from, ...to);
+  const right = Math.max(from, ...to);
+  return (
+    <svg width={BOARD_W} height={height} style={{ display: 'block' }}>
+      <line x1={from} y1={0} x2={from} y2={mid} stroke={LINE} strokeWidth={1.5} />
+      {to.length > 1 || to[0] !== from ? (
+        <line x1={left} y1={mid} x2={right} y2={mid} stroke={LINE} strokeWidth={1.5} />
+      ) : null}
+      {to.map((x) => <line key={x} x1={x} y1={mid} x2={x} y2={height} stroke={LINE} strokeWidth={1.5} />)}
+    </svg>
+  );
+}
+
+/** Коробка керівника, поставлена по центру своєї групи колонок. */
+function Chief({ x, name, holder }: { x: number; name: string; holder?: string }) {
+  const w = 230;
+  return (
+    <div
+      style={{
+        position: 'absolute', left: x - w / 2, width: w, boxSizing: 'border-box',
+        background: 'hsl(var(--card))', border: '1px solid hsl(var(--border))',
+        borderRadius: 8, padding: '7px 10px', textAlign: 'center',
+      }}
+    >
+      <div style={{ fontSize: 12, fontWeight: 600, lineHeight: 1.25 }}>{name}</div>
+      {holder && <div style={{ fontSize: 11, color: 'hsl(var(--muted-foreground))', marginTop: 2 }}>{holder}</div>}
+    </div>
+  );
+}
+
+export default function OrgBoard({ units, members, companyId, statistics = [], companyCkp }: { units: OrgUnit[]; members: Member[]; companyId: string; statistics?: Statistic[]; companyCkp?: string | null }) {
   // статистики за одиницею (перша на одиницю — для sparkline на картці)
   const statOf = (unitId: string) => statistics.find((s) => s.orgUnitId === unitId);
   const [scale, setScale] = useState(1);
@@ -170,25 +230,44 @@ export default function OrgBoard({ units, members, companyId, statistics = [] }:
       <div style={{ overflow: 'auto', border: '1px solid hsl(var(--border))', borderRadius: 'var(--radius)', background: 'hsl(var(--background))', padding: 16 }}>
         <div style={{ transform: `scale(${scale})`, transformOrigin: 'top left', width: 'max-content', transition: 'transform 0.12s' }}>
           <div ref={boardRef} style={{ width: 'max-content', background: 'hsl(var(--background))', padding: 4 }}>
-          {leadership.length > 0 && (
-            <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 20 }}>
-              <div style={{ background: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: 10, padding: '10px 18px', textAlign: 'center' }}>
-                <div style={{ fontSize: 11, color: 'hsl(var(--muted-foreground))', marginBottom: 4 }}>Керівництво</div>
-                <div style={{ display: 'flex', gap: 14, justifyContent: 'center' }}>
-                  {leadership.map((p) => {
-                    const ppl = peopleOf(p.id);
-                    return (
-                      <span key={p.id} style={{ fontSize: 13, fontWeight: 600 }}>
-                        {p.name}{showPeople && <span style={{ color: 'hsl(var(--muted-foreground))', fontWeight: 400 }}> · {ppl.length ? ppl.join(', ') : 'вакансія'}</span>}
-                      </span>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
-          )}
+          {/* ── Верхівка: рада засновників і виконавчий директор ── */}
+          <div style={{ position: 'relative', width: BOARD_W, height: 46 }}>
+            <Chief x={groupX(COUNCIL.divisions)} name={COUNCIL.name} />
+            <Chief
+              x={groupX(DEPUTIES.flatMap((d) => d.divisions))}
+              name={CEO.name}
+              holder={showPeople && leadership[0] ? peopleOf(leadership[0].id)[0] : undefined}
+            />
+          </div>
 
-          <div style={{ display: 'flex', gap: 14, alignItems: 'flex-start' }}>
+          {/* Директор → заступники. Рада засновників іде вниз своєю лінією. */}
+          <Connectors
+            from={groupX(DEPUTIES.flatMap((d) => d.divisions))}
+            to={DEPUTIES.map((d) => groupX(d.divisions))}
+            height={22}
+          />
+
+          <div style={{ position: 'relative', width: BOARD_W, height: 46 }}>
+            {DEPUTIES.map((d) => <Chief key={d.key} x={groupX(d.divisions)} name={d.name} />)}
+          </div>
+
+          {/* Заступники і рада → свої відділення */}
+          <svg width={BOARD_W} height={22} style={{ display: 'block' }}>
+            {[{ from: groupX(COUNCIL.divisions), to: COUNCIL.divisions },
+              ...DEPUTIES.map((d) => ({ from: groupX(d.divisions), to: d.divisions }))]
+              .map(({ from, to }) => {
+                const xs = to.map((n) => colX(colOf(n)));
+                return (
+                  <g key={from}>
+                    <line x1={from} y1={0} x2={from} y2={11} stroke={LINE} strokeWidth={1.5} />
+                    <line x1={Math.min(from, ...xs)} y1={11} x2={Math.max(from, ...xs)} y2={11} stroke={LINE} strokeWidth={1.5} />
+                    {xs.map((x) => <line key={x} x1={x} y1={11} x2={x} y2={22} stroke={LINE} strokeWidth={1.5} />)}
+                  </g>
+                );
+              })}
+          </svg>
+
+          <div style={{ display: 'flex', gap: COL_GAP, alignItems: 'stretch', width: BOARD_W }}>
             {BOARD_ORDER.map((n) => {
               const d = byBoard(n);
               if (!d) return null;
@@ -196,29 +275,38 @@ export default function OrgBoard({ units, members, companyId, statistics = [] }:
               const depts = childrenOf(d.id, 'DEPARTMENT');
               const posts = childrenOf(d.id, 'POST');
               return (
-                <div key={d.id} style={{ width: 250, flex: '0 0 250px', background: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: 10, borderTop: `3px solid ${PAEI_COLOR[role]}`, padding: 12 }}>
+                <div key={d.id} style={{ width: COL_W, flex: `0 0 ${COL_W}px`, background: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: 10, borderTop: `3px solid ${PAEI_COLOR[role]}`, padding: 12, display: 'flex', flexDirection: 'column' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                     <Editable companyId={companyId} unitId={d.id} field="name" value={`${n}. ${d.name}`} bold />
                     <span className={`paei-${role}`} style={{ fontSize: 10, padding: '1px 6px', borderRadius: 5 }}>{role}</span>
                   </div>
-                  <Editable companyId={companyId} unitId={d.id} field="ckp" value={d.ckp ?? ''} prefix="ЦКП: " small />
                   {statOf(d.id) && <Sparkline stat={statOf(d.id)!} />}
 
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 8 }}>
-                    {depts.map((dep) => {
-                      const dPosts = childrenOf(dep.id, 'POST');
-                      return (
-                        <div key={dep.id} {...dropProps(dep.id)} style={{ background: 'hsl(var(--background))', border: `1px solid ${dropTarget === dep.id ? 'hsl(var(--primary))' : 'hsl(var(--border))'}`, boxShadow: dropTarget === dep.id ? '0 0 0 1px hsl(var(--primary))' : 'none', borderRadius: 8, padding: 8 }}>
-                          <Editable companyId={companyId} unitId={dep.id} field="name" value={dep.name} />
-                          <Editable companyId={companyId} unitId={dep.id} field="ckp" value={dep.ckp ?? ''} prefix="ЦКП: " small />
-                          {statOf(dep.id) && <Sparkline stat={statOf(dep.id)!} />}
-                          <div style={{ marginTop: 4 }}>
-                            {dPosts.map((p) => <PostChip key={p.id} p={p} />)}
-                            <AddPost parentId={dep.id} />
+                  {/* Відділи висять на спині відділення — видно, що вони його частина,
+                      а не просто лежать поруч у тій самій картці. */}
+                  <div style={{ position: 'relative', marginTop: depts.length ? 10 : 0 }}>
+                    {depts.length > 0 && (
+                      <div style={{ position: 'absolute', left: 7, top: -10, bottom: 20, width: 1.5, background: LINE }} />
+                    )}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      {depts.map((dep) => {
+                        const dPosts = childrenOf(dep.id, 'POST');
+                        return (
+                          <div key={dep.id} style={{ display: 'flex', alignItems: 'flex-start' }}>
+                            <div style={{ width: 16, height: 1.5, background: LINE, marginTop: 13, flex: '0 0 16px' }} />
+                            <div {...dropProps(dep.id)} style={{ flex: 1, minWidth: 0, background: 'hsl(var(--background))', border: `1px solid ${dropTarget === dep.id ? 'hsl(var(--primary))' : 'hsl(var(--border))'}`, boxShadow: dropTarget === dep.id ? '0 0 0 1px hsl(var(--primary))' : 'none', borderRadius: 8, padding: 8 }}>
+                              <Editable companyId={companyId} unitId={dep.id} field="name" value={dep.name} />
+                              <Editable companyId={companyId} unitId={dep.id} field="ckp" value={dep.ckp ?? ''} prefix="ЦКП: " small />
+                              {statOf(dep.id) && <Sparkline stat={statOf(dep.id)!} />}
+                              <div style={{ marginTop: 4 }}>
+                                {dPosts.map((p) => <PostChip key={p.id} p={p} />)}
+                                <AddPost parentId={dep.id} />
+                              </div>
+                            </div>
                           </div>
-                        </div>
-                      );
-                    })}
+                        );
+                      })}
+                    </div>
                   </div>
 
                   <div {...dropProps(d.id)} style={{ marginTop: 10, borderRadius: 8, padding: dropTarget === d.id ? 6 : 0, border: dropTarget === d.id ? '1px solid hsl(var(--primary))' : '1px solid transparent' }}>
@@ -229,6 +317,45 @@ export default function OrgBoard({ units, members, companyId, statistics = [] }:
                 </div>
               );
             })}
+          </div>
+
+          {/* ── Смуга ЦКП відділень ──────────────────────────────────────────
+              На плакатах Висоцького ЦКП стоїть окремим рядом під колонками, а не
+              дрібним текстом усередині. Так його видно як обіцянку відділення,
+              і порожній ЦКП одразу впадає в око. */}
+          <div style={{ display: 'flex', gap: COL_GAP, alignItems: 'stretch', width: BOARD_W, marginTop: 10 }}>
+            {BOARD_ORDER.map((n) => {
+              const d = byBoard(n);
+              if (!d) return <div key={n} style={{ width: COL_W, flex: `0 0 ${COL_W}px` }} />;
+              return (
+                <div
+                  key={d.id}
+                  style={{
+                    width: COL_W, flex: `0 0 ${COL_W}px`, boxSizing: 'border-box',
+                    background: 'hsl(var(--card))', border: '1px solid hsl(var(--border))',
+                    borderTop: `2px solid ${PAEI_COLOR[DIVISION_PAEI[n]]}`, borderRadius: 8, padding: '8px 10px',
+                  }}
+                >
+                  <div style={{ fontSize: 10, color: 'hsl(var(--muted-foreground))', letterSpacing: '0.04em', marginBottom: 2 }}>
+                    ЦКП ВІДДІЛЕННЯ
+                  </div>
+                  <Editable companyId={companyId} unitId={d.id} field="ckp" value={d.ckp ?? ''} />
+                </div>
+              );
+            })}
+          </div>
+
+          <div
+            style={{
+              width: BOARD_W, boxSizing: 'border-box', marginTop: 10,
+              background: 'hsl(var(--card))', border: '1px solid hsl(var(--border))',
+              borderRadius: 8, padding: '10px 14px', textAlign: 'center',
+            }}
+          >
+            <span style={{ fontSize: 11, color: 'hsl(var(--muted-foreground))', letterSpacing: '0.04em' }}>ЦКП КОМПАНІЇ: </span>
+            <span style={{ fontSize: 13.5, fontWeight: 600 }}>
+              {companyCkp || <span style={{ color: 'hsl(var(--muted-foreground))', fontWeight: 400 }}>не заповнено — асистент запише його після знайомства</span>}
+            </span>
           </div>
           </div>
         </div>
