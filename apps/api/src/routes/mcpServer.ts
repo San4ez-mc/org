@@ -110,6 +110,13 @@ const TOOLS = [
         mission: { type: 'string', description: 'Чим займається компанія: що продає, кому, у чому цінність. Одне-два речення.' },
         companyCkp: { type: 'string', description: 'ЦКП компанії — результат-іменник, за який платить клієнт.' },
         idealPicture: { type: 'string', description: 'Якою клієнт хоче бачити компанію за рік-два. Необовязково.' },
+        crmSheetId: {
+          type: 'string',
+          description:
+            'Google-таблиця, де клієнт веде клієнтів і кандидатів. Можна передати повне '
+            + 'посилання — id витягнеться сам. Саме звідси працюють crm_search і crm_update: '
+            + 'без цього поля вони не працюють, скільки б разів посилання не прозвучало в розмові.',
+        },
       },
     },
   },
@@ -477,11 +484,18 @@ async function callTool(name: string, args: any, ctx: Ctx): Promise<unknown> {
         const v = String(args?.[f] ?? '').trim();
         if (v) data[f] = v;
       }
-      if (!Object.keys(data).length) throw new Error('Нічого зберігати: вкажи mission або companyCkp');
+      // Клієнт кидає посилання, а не id — витягуємо самі, інакше поле лишається
+      // порожнім і crm_search мовчки не працює при «наче все сказано».
+      const sheetRaw = String(args?.crmSheetId ?? '').trim();
+      if (sheetRaw) {
+        const m = sheetRaw.match(/\/spreadsheets\/d\/([a-zA-Z0-9_-]{20,})/);
+        data.crmSheetId = m ? m[1] : sheetRaw;
+      }
+      if (!Object.keys(data).length) throw new Error('Нічого зберігати: вкажи mission, companyCkp або crmSheetId');
       const saved = await prisma.company.update({
         where: { id: ctx.companyId },
         data,
-        select: { name: true, mission: true, companyCkp: true },
+        select: { name: true, mission: true, companyCkp: true, crmSheetId: true },
       });
       return { ok: true, company: saved };
     }
@@ -755,10 +769,28 @@ async function callTool(name: string, args: any, ctx: Ctx): Promise<unknown> {
     case 'memory_write': {
       const text = String(args?.text ?? '').trim();
       if (!text) throw new Error('Порожній запис памʼяті');
-      const note = await prisma.assistantMemory.create({
-        data: { companyId: ctx.companyId, text, tag: args?.tag ? String(args.tag) : null },
-        select: { id: true, createdAt: true },
-      });
+      const tag = args?.tag ? String(args.tag).trim() : null;
+
+      // Памʼять із однією й тією ж міткою переписуємо, а не додаємо поруч.
+      // Прохання в промпті «не дублюй» модель не втримує: після двох інтервʼю
+      // в памʼяті лежало чотири записи «інструменти» й два «стоп-лист», і на
+      // питання «якою мовою писати клієнтам» знаходились дві різні відповіді.
+      const prior = tag
+        ? await prisma.assistantMemory.findFirst({
+          where: { companyId: ctx.companyId, tag },
+          orderBy: { createdAt: 'desc' },
+          select: { id: true },
+        })
+        : null;
+
+      const note = prior
+        ? await prisma.assistantMemory.update({
+          where: { id: prior.id }, data: { text }, select: { id: true, createdAt: true },
+        })
+        : await prisma.assistantMemory.create({
+          data: { companyId: ctx.companyId, text, tag },
+          select: { id: true, createdAt: true },
+        });
 
       // Копія у вектор — щоб памʼять шукалась змістом. Best-effort: якщо вектор
       // недоступний, запис усе одно збережено, і це головне.
