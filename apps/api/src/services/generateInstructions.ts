@@ -157,7 +157,7 @@ export async function generateInstructions(companyId: string): Promise<GenerateR
       );
 
       const clean = text.replace(/```(?:markdown)?/gi, '').trim();
-      const r = await writeFile('', `${post.name} — Інструкція`, clean, docId);
+      const r = await writeFile('', `${post.name} — Інструкція`, clean, docId, { markdown: true });
       generated.push({ post: post.name, url: r.webViewLink, chars: clean.length });
     }
   });

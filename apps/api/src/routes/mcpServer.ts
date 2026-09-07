@@ -291,24 +291,33 @@ function normalizeSteps(steps: unknown): unknown {
 }
 
 /**
- * Канонічне відділення за номером. Створюємо ліниво: сім відділень зʼявляються
- * лише в стадійному інтервʼю, а асистент користується цим інструментом — без
- * цього пошук за номером нічого не знаходив і посади лишались без батька.
+ * Канонічне відділення за номером — із гарантією, що є всі сім.
+ *
+ * Раніше створювалось тільки те, куди щойно поклали посаду, і компанія з трьома
+ * людьми мала три відділення. Це не «менше зайвого», це неправда: сім відділень
+ * у компанії є завжди, просто частину з них поки тягне власник. Порожнє
+ * відділення на схемі — видиме питання «а хто це робить?»; відсутнє — жодного.
  */
 async function ensureDivision(companyId: string, boardNo: number): Promise<string | null> {
+  const have = await prisma.orgUnit.findMany({
+    where: { companyId, type: 'DIVISION' },
+    select: { id: true, boardNo: true },
+  });
+  const missing = CANONICAL_DIVISIONS.filter((c) => !have.some((h) => h.boardNo === c.boardNo));
+  if (missing.length) {
+    await prisma.orgUnit.createMany({
+      data: missing.map((c) => ({
+        companyId, type: 'DIVISION' as const, name: c.name, boardNo: c.boardNo, ckp: c.ckp,
+        origin: 'CANONICAL',
+      })),
+      skipDuplicates: true,
+    });
+  }
   const found = await prisma.orgUnit.findFirst({
     where: { companyId, type: 'DIVISION', boardNo },
     select: { id: true },
   });
-  if (found) return found.id;
-
-  const canon = CANONICAL_DIVISIONS.find((d) => d.boardNo === boardNo);
-  if (!canon) return null;
-  const created = await prisma.orgUnit.create({
-    data: { companyId, type: 'DIVISION', name: canon.name, boardNo, ckp: canon.ckp },
-    select: { id: true },
-  });
-  return created.id;
+  return found?.id ?? null;
 }
 
 /** Канонічний відділ усередині відділення — створюємо так само ліниво. */

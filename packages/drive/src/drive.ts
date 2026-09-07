@@ -1,4 +1,5 @@
 import { getDrive, getSheets, getDocs, SHARED_DRIVE_PARAMS } from './google';
+import { markdownToDoc } from './markdownDoc';
 
 const FOLDER_MIME = 'application/vnd.google-apps.folder';
 const SHEET_MIME = 'application/vnd.google-apps.spreadsheet';
@@ -700,6 +701,7 @@ export async function writeFile(
   filename: string,
   content: string,
   fileId?: string,
+  opts?: { markdown?: boolean },
 ): Promise<{ fileId: string; created: boolean; webViewLink: string }> {
   const docs = getDocs();
 
@@ -708,12 +710,19 @@ export async function writeFile(
     const body = doc.data.body?.content ?? [];
     const endIndex = body.length ? body[body.length - 1].endIndex ?? 1 : 1;
 
+    // Маркдаун у Google-документі — це решітки й зірочки на екрані. Розмітку
+    // перекладаємо в стилі документа: інструкцію читає людина в перший день.
+    const styled = opts?.markdown && content ? markdownToDoc(content, 1) : null;
+    const text = styled ? styled.plain : content;
+
     const requests: any[] = [];
     // Тіло документа завжди закінчується службовим \n — його видалити не можна, тому endIndex - 1.
     if (endIndex > 2) {
       requests.push({ deleteContentRange: { range: { startIndex: 1, endIndex: endIndex - 1 } } });
     }
-    if (content) requests.push({ insertText: { location: { index: 1 }, text: content } });
+    if (text) requests.push({ insertText: { location: { index: 1 }, text } });
+    // Стилі довжину тексту не міняють, тож ідуть тією ж пачкою одразу після вставки.
+    if (styled) requests.push(...(styled.requests as any[]));
     if (requests.length) {
       await withRetry(() => docs.documents.batchUpdate({ documentId: fileId, requestBody: { requests } }));
     }
@@ -721,12 +730,11 @@ export async function writeFile(
   }
 
   const existing = await findChild(folderId, filename, DOC_MIME);
-  const id = await ensureDoc(folderId, filename, existing ? undefined : content);
-
-  // ensureDoc знайшов наявний документ — вміст треба замінити явно.
-  if (existing) return writeFile(folderId, filename, content, existing);
-
-  return { fileId: id, created: true, webViewLink: `https://docs.google.com/document/d/${id}/edit` };
+  // Документ створюємо порожнім і наповнюємо другим проходом: коли текст іде
+  // одразу при створенні, вішати стилі вже нема на що — індексів ще не існує.
+  const id = existing ?? (await ensureDoc(folderId, filename, undefined));
+  const res = await writeFile(folderId, filename, content, id, opts);
+  return { ...res, created: !existing };
 }
 
 /** Чи лежить файл безпосередньо в теці. Використовується для перевірки whitelist перед записом. */
