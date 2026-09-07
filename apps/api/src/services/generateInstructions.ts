@@ -160,13 +160,9 @@ export async function generateInstructions(companyId: string): Promise<GenerateR
       // і тоді роль заголовка першого рівня забирає перший-ліпший розділ.
       const body = text
         .replace(/```(?:markdown)?/gi, '')
-        .replace(/^\s*#{1,3}\s*Посадова інструкція[^
-]*
-+/i, '')
+        .replace(/^\s*#{1,3}\s*Посадова інструкція[^\n]*\n+/i, '')
         .trim();
-      const clean = `# Посадова інструкція — ${post.name}
-
-${body}`;
+      const clean = `# Посадова інструкція — ${post.name}\n\n${body}`;
       const r = await writeFile('', `${post.name} — Інструкція`, clean, docId, { markdown: true });
       generated.push({ post: post.name, url: r.webViewLink, chars: clean.length });
     }
