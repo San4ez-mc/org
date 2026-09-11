@@ -6,6 +6,9 @@ import {
   writeSheetValues,
   setRowBackground,
   driveFolderUrl,
+  listFolderFiles,
+  readFileById,
+  writeFile,
   type RowColor,
 } from './drive';
 import {
@@ -13,6 +16,7 @@ import {
   DIVISION_PAEI,
   PAEI_ROLES,
   instructionSkeleton,
+  TEMPLATES_FOLDER,
 } from '@platform/org-template';
 
 /**
@@ -251,4 +255,30 @@ export async function addCompanyPost(
   const employee = await ensureEmployeeFolder(employeesRoot, personName);
   await ensurePostInEmployeeFolder(employee, title, doc);
   return doc;
+}
+
+/**
+ * Заготовка документа в теці клієнта — щоб її можна було правити руками.
+ *
+ * Створюємо один раз і більше не чіпаємо: клієнт правит документ під себе, і
+ * перезаписувати його «канонічною» версією означало б щоразу стирати його
+ * роботу. Тому повертаємо текст ТОГО документа, який лежить на Диску — навіть
+ * якщо він уже не схожий на наш.
+ */
+export async function ensureDocumentTemplate(
+  companyFolderId: string,
+  title: string,
+  skeleton: string,
+): Promise<{ fileId: string; text: string; own: boolean }> {
+  const shared = await ensureFolder(companyFolderId, SHARED);
+  const folder = await ensureFolder(shared, TEMPLATES_FOLDER);
+
+  const existing = (await listFolderFiles(folder)).find((f) => f.name === title);
+  if (existing) {
+    const r = await readFileById(existing.id).catch(() => null);
+    return { fileId: existing.id, text: (r && r.text) || skeleton, own: true };
+  }
+
+  const created = await writeFile(folder, title, skeleton, undefined, { markdown: true });
+  return { fileId: created.fileId, text: skeleton, own: false };
 }

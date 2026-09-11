@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { prisma } from '@platform/db';
-import { CANONICAL_DIVISIONS } from '@platform/org-template';
+import { CANONICAL_DIVISIONS, findTemplate, templatesForPrompt } from '@platform/org-template';
 import { classifyPostDivision } from '../services/classifyDivision';
 import { vectorSearch } from '../services/vector';
 import { loadDriveScope, resolveWriteTarget, type DriveScope } from '../services/driveScope';
@@ -8,7 +8,7 @@ import { runAsUser } from '@platform/drive';
 import { publishStructureToDrive } from '../services/publishStructure';
 import { generateInstructions } from '../services/generateInstructions';
 import {
-  searchFiles, readFileById, writeFile,
+  searchFiles, readFileById, writeFile, ensureDocumentTemplate,
   readSheetRows, updateSheetRow, appendSheetValues,
 } from '@platform/drive';
 
@@ -172,6 +172,21 @@ const TOOLS = [
         },
       },
       required: ['name'],
+    },
+  },
+  {
+    name: 'document_template',
+    domain: 'drive',
+    description:
+      'Заготовка документа під задачу: лонглист кандидатів, комерційна пропозиція, '
+      + 'довідка про кандидата. Повертає структуру, якої треба дотриматись, і теку, '
+      + 'куди класти готове. Якщо клієнт правив заготовку під себе — повертається ЙОГО '
+      + 'версія: вона перевірена його ринком і краща за нашу. Без аргументів — список видів.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        kind: { type: 'string', description: 'longlist | proposal | candidate_brief. Пропусти, щоб побачити всі.' },
+      },
     },
   },
   {
@@ -528,6 +543,31 @@ async function callTool(name: string, args: any, ctx: Ctx): Promise<unknown> {
       const range = `'${sheet.sheetTitle.replace(/'/g, "''")}'!A1`;
       await appendSheetValues(sheetId, [values], range);
       return { ok: true, mode: 'append' };
+    }
+
+    case 'document_template': {
+      const kind = String(args?.kind ?? '').trim();
+      if (!kind) return { templates: templatesForPrompt() };
+
+      const tpl = findTemplate(kind);
+      if (!tpl) {
+        throw new Error(`Немає заготовки «${kind}». Доступні:
+${templatesForPrompt()}`);
+      }
+      if (!ctx.scope.writeFolderId) throw new Error('Для компанії не налаштована тека запису');
+
+      // Заготовка живе документом у клієнта, а не рядком у промпті: правити
+      // промпт може лише розробник, а документ на Диску — сама власниця.
+      const doc = await ensureDocumentTemplate(ctx.scope.writeFolderId, tpl.title, tpl.skeleton);
+      return {
+        kind: tpl.kind,
+        folder: tpl.folder,
+        source: doc.own ? 'версія клієнта (правлена на Диску)' : 'базова заготовка платформи',
+        editUrl: `https://docs.google.com/document/d/${doc.fileId}/edit`,
+        structure: doc.text,
+        note: 'Дотримайся цієї структури. Плейсхолдери у {{фігурних дужках}} заміни справжніми даними; '
+          + 'де даних немає — напиши «Потребує уточнення», а не вигадуй.',
+      };
     }
 
     case 'company_upsert': {
