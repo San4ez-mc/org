@@ -123,7 +123,10 @@ const TOOLS = [
   {
     name: 'org_structure_read',
     domain: 'org',
-    description: 'Орг-структура компанії: відділення, відділи, посади і хто їх обіймає. Без аргументів повертає все дерево.',
+    description:
+      'Орг-структура компанії: відділення, відділи, посади і хто їх обіймає. Без аргументів — усе дерево. '
+      + 'Повертає також gaps: чого в базі бракує. Звіряйся з ним перед тим, як казати клієнту, що щось зібрано: '
+      + 'це факт із бази, а не твоя памʼять про розмову.',
     inputSchema: {
       type: 'object',
       properties: { query: { type: 'string', description: 'Необовязковий фільтр за назвою підрозділу чи посади' } },
@@ -418,6 +421,55 @@ async function findUnitByName(
   return found[0];
 }
 
+/**
+ * Чого бракує в базі компанії — рахуємо з даних, а не з памʼяті про розмову.
+ *
+ * На живому онбордингу асистентка підбила підсумок «пройшли майже все», хоча
+ * підпорядкування не було записане в жодної з девʼяти посад. Вона не збрехала:
+ * про підпорядкування говорили, і для неї блок був закритий. Але в структурі
+ * порожньо, і в інструкціях там стояло б «потребує уточнення».
+ *
+ * Тому список прогалин повертається разом зі структурою: це факт із бази, який
+ * не залежить від того, що асистентка памʼятає про розмову.
+ */
+async function collectGaps(ctx: Ctx): Promise<string[]> {
+  const gaps: string[] = [];
+  const [company, posts, processes] = await Promise.all([
+    prisma.company.findUnique({
+      where: { id: ctx.companyId },
+      select: { mission: true, companyCkp: true, crmSheetId: true },
+    }),
+    prisma.orgUnit.findMany({
+      where: { companyId: ctx.companyId, type: 'POST' },
+      select: { name: true, ckp: true, holderName: true, reportsToUnitId: true },
+    }),
+    prisma.process.findMany({
+      where: { companyId: ctx.companyId },
+      select: { name: true, steps: true },
+    }),
+  ]);
+
+  if (!company?.mission) gaps.push('не записано, чим займається компанія (company_upsert: mission)');
+  if (!company?.companyCkp) gaps.push('не записано ЦКП компанії (company_upsert: companyCkp)');
+  if (!company?.crmSheetId) gaps.push('не вказано CRM-таблицю — crm_search без неї не працює (company_upsert: crmSheetId)');
+
+  const noBoss = posts.filter((p) => !p.reportsToUnitId).map((p) => p.name);
+  if (noBoss.length) gaps.push(`посади без підпорядкування (${noBoss.length}): ${noBoss.join(', ')}`);
+
+  const noCkp = posts.filter((p) => !p.ckp?.trim()).map((p) => p.name);
+  if (noCkp.length) gaps.push(`посади без ЦКП (${noCkp.length}): ${noCkp.join(', ')}`);
+
+  const noSteps = processes
+    .filter((x) => !Array.isArray(x.steps) || !(x.steps as unknown[]).length)
+    .map((x) => x.name);
+  if (noSteps.length) gaps.push(`процеси названі, але не описані кроками (${noSteps.length}): ${noSteps.join(', ')}`);
+
+  if (!posts.length) gaps.push('у структурі немає жодної посади');
+  if (!processes.length) gaps.push('не описано жодного процесу');
+
+  return gaps;
+}
+
 /** Знайти посаду за назвою в межах компанії — модель оперує назвами, не id. */
 async function resolveReportsTo(companyId: string, name: unknown): Promise<string | null> {
   const q = String(name ?? '').trim();
@@ -520,7 +572,7 @@ async function callTool(name: string, args: any, ctx: Ctx): Promise<unknown> {
           isVacant: u.isVacant,
         }))
         .filter((u) => !q || u.name.toLowerCase().includes(q));
-      return { count: shaped.length, units: shaped };
+      return { count: shaped.length, units: shaped, gaps: await collectGaps(ctx) };
     }
 
     case 'org_unit_upsert': {
