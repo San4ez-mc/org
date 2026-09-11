@@ -562,7 +562,9 @@ ${templatesForPrompt()}`);
       return {
         kind: tpl.kind,
         folder: tpl.folder,
-        source: doc.own ? 'версія клієнта (правлена на Диску)' : 'базова заготовка платформи',
+        source: doc.own
+          ? 'документ із теки клієнта — саме він джерело істини, навіть якщо відрізняється від базового'
+          : 'щойно створена базова заготовка',
         editUrl: `https://docs.google.com/document/d/${doc.fileId}/edit`,
         structure: doc.text,
         note: 'Дотримайся цієї структури. Плейсхолдери у {{фігурних дужках}} заміни справжніми даними; '
