@@ -19,6 +19,7 @@ import { driveTools } from './driveTools';
 import { agentTools } from './agentTools';
 import { companyDriveContext, forgetCompanyDriveContext } from '../middleware/companyDriveContext';
 import { publishStructureToDrive } from '../services/publishStructure';
+import { ensureGroupArchiveDoc, appendToDoc } from '@platform/drive';
 import { generateInstructions } from '../services/generateInstructions';
 import { CANONICAL_DIVISIONS } from '@platform/org-template';
 
@@ -2196,6 +2197,39 @@ api.post('/companies/:id/build-structure', async (req, res) => {
  * теки посад із ярликами. Ланка, якої не було — база наповнювалась, а на Диску
  * не зʼявлялось нічого.
  */
+/**
+ * Архів повідомлення робочої групи в документ на Диску клієнта.
+ *
+ * Логіка живе тут, а не у воронці, хоч у сусідньому боті вона зроблена нодами:
+ * там це дванадцять JS-вузлів, які самі тримають токени й самі шукають файл.
+ * Тут уже є делегований доступ до диска клієнта, тож воронці лишається один
+ * виклик, а вся робота з Google — в одному місці для всіх клієнтів одразу.
+ */
+api.post('/companies/:id/group-archive', async (req, res) => {
+  try {
+    const group = String(req.body?.group ?? '').trim();
+    const text = String(req.body?.text ?? '').trim();
+    if (!group || !text) {
+      return void res.status(400).json({ error: 'потрібні group і text' });
+    }
+
+    const scope = await loadDriveScope(req.params.id);
+    if (!scope.writeFolderId) return void res.status(400).json({ error: 'no-write-folder' });
+
+    const result = await withCompanyDrive(req.params.id, async () => {
+      const doc = await ensureGroupArchiveDoc(scope.writeFolderId!, group);
+      const stamp = new Date().toLocaleString('uk-UA', { timeZone: 'Europe/Kyiv' });
+      await appendToDoc(doc.fileId, `
+[${stamp}] ${text}`);
+      return doc;
+    });
+
+    res.json({ ok: true, url: result.url, created: result.created });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
 api.post('/companies/:id/publish-structure', async (req, res) => {
   try {
     const r = await publishStructureToDrive(req.params.id);

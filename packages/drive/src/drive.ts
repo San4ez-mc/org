@@ -745,3 +745,24 @@ export async function isFileInFolder(fileId: string, folderId: string): Promise<
   );
   return (res.data.parents ?? []).includes(folderId);
 }
+
+/**
+ * Дописати абзац у кінець Google-документа.
+ *
+ * Саме дописати, а не перезаписати: архів чату росте щодня, і читати його
+ * доведеться людині — тож переписувати весь документ щоразу означало б і
+ * зайвий трафік, і ризик втратити попереднє при збої на середині.
+ */
+export async function appendToDoc(fileId: string, text: string): Promise<void> {
+  if (!text) return;
+  const docs = getDocs();
+  const doc = await withRetry(() => docs.documents.get({ documentId: fileId }));
+  const body = doc.data.body?.content ?? [];
+  // Тіло завжди закінчується службовим переводом рядка — вставляємо перед ним.
+  const endIndex = body.length ? (body[body.length - 1].endIndex ?? 1) : 1;
+  const at = Math.max(1, endIndex - 1);
+  await withRetry(() => docs.documents.batchUpdate({
+    documentId: fileId,
+    requestBody: { requests: [{ insertText: { location: { index: at }, text } }] },
+  }));
+}

@@ -9,6 +9,7 @@ import {
   listFolderFiles,
   readFileById,
   writeFile,
+  appendToDoc,
   type RowColor,
 } from './drive';
 import {
@@ -281,4 +282,32 @@ export async function ensureDocumentTemplate(
 
   const created = await writeFile(folder, title, skeleton, undefined, { markdown: true });
   return { fileId: created.fileId, text: skeleton, own: false };
+}
+
+/**
+ * Документ-архів робочої групи.
+ *
+ * Лежить там, де йому належить за методологією: комунікації — це відділ
+ * комунікацій відділення побудови. Один документ на групу, щоб історію можна
+ * було читати як переписку, а не шукати потрібне серед усіх чатів одразу.
+ */
+export async function ensureGroupArchiveDoc(
+  companyFolderId: string,
+  groupTitle: string,
+): Promise<{ fileId: string; created: boolean; url: string }> {
+  const division = await ensureFolder(companyFolderId, divisionLabel(1));
+  const dept = await ensureFolder(division, 'Відділ комунікацій');
+  const agentFolder = await ensureFolder(dept, 'ШІ-агент');
+
+  const safe = String(groupTitle || 'Без назви').replace(/[\/]/g, '-').slice(0, 90);
+  const title = `Чат — ${safe}`;
+
+  const existing = (await listFolderFiles(agentFolder)).find((f) => f.name === title);
+  if (existing) {
+    return { fileId: existing.id, created: false, url: `https://docs.google.com/document/d/${existing.id}/edit` };
+  }
+
+  const header = `# ${title}\n\nАрхів робочої групи. Пише Алекса, по одному рядку на повідомлення.\n\n`;
+  const doc = await writeFile(agentFolder, title, header, undefined, { markdown: true });
+  return { fileId: doc.fileId, created: true, url: doc.webViewLink };
 }
