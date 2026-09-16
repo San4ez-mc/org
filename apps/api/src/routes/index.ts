@@ -20,6 +20,7 @@ import { agentTools } from './agentTools';
 import { companyDriveContext, forgetCompanyDriveContext } from '../middleware/companyDriveContext';
 import { publishStructureToDrive } from '../services/publishStructure';
 import { ensureGroupArchiveDoc, appendToDoc } from '@platform/drive';
+import { withCompanyDrive } from '../services/driveScope';
 import { generateInstructions } from '../services/generateInstructions';
 import { CANONICAL_DIVISIONS } from '@platform/org-template';
 
@@ -2213,11 +2214,9 @@ api.post('/companies/:id/group-archive', async (req, res) => {
       return void res.status(400).json({ error: 'потрібні group і text' });
     }
 
-    const scope = await loadDriveScope(req.params.id);
-    if (!scope.writeFolderId) return void res.status(400).json({ error: 'no-write-folder' });
-
-    const result = await withCompanyDrive(req.params.id, async () => {
-      const doc = await ensureGroupArchiveDoc(scope.writeFolderId!, group);
+    const result = await withCompanyDrive(req.params.id, async (scope) => {
+      if (!scope.writeFolderId) throw new Error('no-write-folder');
+      const doc = await ensureGroupArchiveDoc(scope.writeFolderId, group);
       const stamp = new Date().toLocaleString('uk-UA', { timeZone: 'Europe/Kyiv' });
       await appendToDoc(doc.fileId, `
 [${stamp}] ${text}`);
