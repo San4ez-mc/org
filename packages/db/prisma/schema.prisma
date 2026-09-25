@@ -83,6 +83,10 @@ model Company {
   orgSheetId        String? // Google Sheet з оргсхемою
   assistantMemory   AssistantMemory[]
   crmSheetId        String? // CRM-таблиця асистента (Digital Hiring); id тримаємо тут, щоб модель його не бачила
+  // Аркуш усередині CRM-таблиці. Без нього читався перший-ліпший, а в клієнтки
+  // першим виявився «Опрацювання лідів (архів)» — асистент відповідав із архіву
+  // і не бачив актуальних аркушів. Вгадувати тут не можна: назви у всіх різні.
+  crmSheetTab       String?
   googleAccountId   String? // прив'язаний OAuth Google-акаунт (для Drive/Sheets/Docs)
 
   // #213 Стратегічний шар

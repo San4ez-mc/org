@@ -38,6 +38,7 @@ interface Ctx {
   /** Що читаємо і куди пишемо — з полів компанії, не з констант. */
   scope: DriveScope;
   crmSheetId: string | null;
+  crmSheetTab: string | null;
   vectorToken: string | null;
 }
 
@@ -141,6 +142,12 @@ const TOOLS = [
         mission: { type: 'string', description: 'Чим займається компанія: що продає, кому, у чому цінність. Одне-два речення.' },
         companyCkp: { type: 'string', description: 'ЦКП компанії — результат-іменник, за який платить клієнт.' },
         idealPicture: { type: 'string', description: 'Якою клієнт хоче бачити компанію за рік-два. Необовязково.' },
+        crmSheetTab: {
+          type: 'string',
+          description:
+            'Назва РОБОЧОГО аркуша в CRM-таблиці. Назви аркушів повертає crm_search у полі tabs. '
+            + 'Без нього читається перший, а він у клієнта цілком може бути архівним.',
+        },
         crmSheetId: {
           type: 'string',
           description:
@@ -577,7 +584,7 @@ async function callTool(name: string, args: any, ctx: Ctx): Promise<unknown> {
       // Аркуші віддаємо завжди: клієнтка веде ліди й акт в одній таблиці, і поки
       // асистент бачив лише перший аркуш, він відповідав «інших не бачу».
       const tabs = await listSheetTabs(sheetId);
-      const wanted = String(args?.tab ?? '').trim();
+      const wanted = String(args?.tab ?? ctx.crmSheetTab ?? '').trim();
       if (wanted && !tabs.some((t) => t.toLowerCase() === wanted.toLowerCase())) {
         throw new Error(`Аркуша «${wanted}» немає. Доступні: ${tabs.join(', ')}`);
       }
@@ -587,14 +594,24 @@ async function callTool(name: string, args: any, ctx: Ctx): Promise<unknown> {
       const rows = q
         ? sheet.rows.filter((r) => r.values.some((v) => v.toLowerCase().includes(q)))
         : sheet.rows;
-      return { tabs, tab: exact ?? sheet.sheetTitle, header: sheet.header, count: rows.length, rows };
+      return {
+        tabs,
+        tab: exact ?? sheet.sheetTitle,
+        header: sheet.header,
+        count: rows.length,
+        rows,
+        ...(ctx.crmSheetTab ? {} : {
+          note: 'Робочий аркуш не вказаний, тому взято перший — він може виявитись архівним. '
+            + 'Звір із клієнтом, який аркуш робочий, і збережи через company_upsert(crmSheetTab).',
+        }),
+      };
     }
 
     case 'crm_update': {
       const sheetId = needSheet();
       // Запис теж має потрапляти в потрібний аркуш: інакше рядок про акт ліг би
       // серед лідів, і клієнтка знайшла б його не там, де шукає.
-      const wantedTab = String(args?.tab ?? '').trim();
+      const wantedTab = String(args?.tab ?? ctx.crmSheetTab ?? '').trim();
       let tabRange: string | undefined;
       if (wantedTab) {
         const tabs = await listSheetTabs(sheetId);
@@ -650,12 +667,14 @@ ${templatesForPrompt()}`);
       }
       // Клієнт кидає посилання, а не id — витягуємо самі, інакше поле лишається
       // порожнім і crm_search мовчки не працює при «наче все сказано».
+      const tabRaw = String(args?.crmSheetTab ?? '').trim();
+      if (tabRaw) data.crmSheetTab = tabRaw;
       const sheetRaw = String(args?.crmSheetId ?? '').trim();
       if (sheetRaw) {
         const m = sheetRaw.match(/\/spreadsheets\/d\/([a-zA-Z0-9_-]{20,})/);
         data.crmSheetId = m ? m[1] : sheetRaw;
       }
-      if (!Object.keys(data).length) throw new Error('Нічого зберігати: вкажи mission, companyCkp або crmSheetId');
+      if (!Object.keys(data).length) throw new Error('Нічого зберігати: вкажи mission, companyCkp, crmSheetId або crmSheetTab');
       const saved = await prisma.company.update({
         where: { id: ctx.companyId },
         data,
@@ -1041,7 +1060,7 @@ mcpServer.post('/:domain', async (req, res) => {
 
       const company = await prisma.company.findUnique({
         where: { id: companyId },
-        select: { id: true, driveRootFolderId: true, crmSheetId: true, vectorToken: true },
+        select: { id: true, driveRootFolderId: true, crmSheetId: true, crmSheetTab: true, vectorToken: true },
       });
       if (!company) return void fail(-32602, 'Компанію не знайдено');
 
@@ -1059,6 +1078,7 @@ mcpServer.post('/:domain', async (req, res) => {
           driveRootFolderId: company.driveRootFolderId,
           scope,
           crmSheetId: company.crmSheetId,
+          crmSheetTab: company.crmSheetTab,
           vectorToken: company.vectorToken,
         }),
       );
