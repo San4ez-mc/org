@@ -10,7 +10,7 @@ import { publishStructureToDrive } from '../services/publishStructure';
 import { generateInstructions } from '../services/generateInstructions';
 import {
   searchFiles, readFileById, writeFile, ensureDocumentTemplate,
-  readSheetRows, updateSheetRow, appendSheetValues,
+  readSheetRows, listSheetTabs, updateSheetRow, appendSheetValues,
 } from '@platform/drive';
 
 /**
@@ -316,10 +316,16 @@ const TOOLS = [
   {
     name: 'crm_search',
     domain: 'crm',
-    description: 'Подивитись CRM-таблицю компанії. Порожній query повертає всі рядки й назви колонок. Кожен рядок має rowNumber для crm_update.',
+    description:
+      'Подивитись CRM-таблицю компанії. Порожній query повертає всі рядки й назви колонок. '
+      + 'Кожен рядок має rowNumber для crm_update. У відповіді є tabs — усі аркуші таблиці; '
+      + 'потрібен не перший, передай його назву в tab.',
     inputSchema: {
       type: 'object',
-      properties: { query: { type: 'string', description: 'Фільтр; порожній рядок — уся таблиця' } },
+      properties: {
+        query: { type: 'string', description: 'Фільтр; порожній рядок — уся таблиця' },
+        tab: { type: 'string', description: 'Назва аркуша. Порожньо — перший. Список аркушів повертається полем tabs.' },
+      },
       required: ['query'],
     },
   },
@@ -332,6 +338,7 @@ const TOOLS = [
       properties: {
         rowNumber: { type: 'number' },
         record: { type: 'object' },
+        tab: { type: 'string', description: 'Аркуш таблиці. Порожньо — перший. Назви аркушів дає crm_search.' },
       },
       required: ['record'],
     },
@@ -566,17 +573,36 @@ async function callTool(name: string, args: any, ctx: Ctx): Promise<unknown> {
       });
 
     case 'crm_search': {
-      const sheet = await readSheetRows(needSheet());
+      const sheetId = needSheet();
+      // Аркуші віддаємо завжди: клієнтка веде ліди й акт в одній таблиці, і поки
+      // асистент бачив лише перший аркуш, він відповідав «інших не бачу».
+      const tabs = await listSheetTabs(sheetId);
+      const wanted = String(args?.tab ?? '').trim();
+      if (wanted && !tabs.some((t) => t.toLowerCase() === wanted.toLowerCase())) {
+        throw new Error(`Аркуша «${wanted}» немає. Доступні: ${tabs.join(', ')}`);
+      }
+      const exact = wanted ? tabs.find((t) => t.toLowerCase() === wanted.toLowerCase()) : undefined;
+      const sheet = await readSheetRows(sheetId, exact ? `'${exact.replace(/'/g, "''")}'` : undefined);
       const q = String(args?.query ?? '').trim().toLowerCase();
       const rows = q
         ? sheet.rows.filter((r) => r.values.some((v) => v.toLowerCase().includes(q)))
         : sheet.rows;
-      return { header: sheet.header, count: rows.length, rows };
+      return { tabs, tab: exact ?? sheet.sheetTitle, header: sheet.header, count: rows.length, rows };
     }
 
     case 'crm_update': {
       const sheetId = needSheet();
-      const sheet = await readSheetRows(sheetId);
+      // Запис теж має потрапляти в потрібний аркуш: інакше рядок про акт ліг би
+      // серед лідів, і клієнтка знайшла б його не там, де шукає.
+      const wantedTab = String(args?.tab ?? '').trim();
+      let tabRange: string | undefined;
+      if (wantedTab) {
+        const tabs = await listSheetTabs(sheetId);
+        const exact = tabs.find((t) => t.toLowerCase() === wantedTab.toLowerCase());
+        if (!exact) throw new Error(`Аркуша «${wantedTab}» немає. Доступні: ${tabs.join(', ')}`);
+        tabRange = `'${exact.replace(/'/g, "''")}'`;
+      }
+      const sheet = await readSheetRows(sheetId, tabRange);
       if (!sheet.header.length) throw new Error('У таблиці немає рядка заголовків');
       const values = recordToRow(sheet.header, (args?.record ?? {}) as Record<string, unknown>);
       const rowNumber = args?.rowNumber;
@@ -644,6 +670,11 @@ ${templatesForPrompt()}`);
         where: { companyId: ctx.companyId },
         select: {
           id: true, name: true, type: true, parentId: true, ckp: true, isVacant: true,
+          // holderName — те, що пише сам асистент через org_unit_upsert; memberPosts —
+          // люди, заведені в платформі як користувачі. Читати треба обидва: інакше
+          // асистент бачить порожню структуру там, де сам же записав команду, і
+          // просить клієнта перелічити всіх удруге.
+          holderName: true,
           memberPosts: {
             where: { removedAt: null },
             select: { member: { select: { firstName: true, lastName: true } } },
@@ -654,7 +685,10 @@ ${templatesForPrompt()}`);
       const shaped = units
         .map((u) => ({
           id: u.id, name: u.name, type: u.type, parentId: u.parentId, ckp: u.ckp,
-          holders: u.memberPosts.map((mp) => [mp.member.firstName, mp.member.lastName].filter(Boolean).join(' ')),
+          holders: [
+            ...u.memberPosts.map((mp) => [mp.member.firstName, mp.member.lastName].filter(Boolean).join(' ')),
+            ...(u.holderName ? [u.holderName] : []),
+          ].filter((v, i, a) => v && a.indexOf(v) === i),
           isVacant: u.isVacant,
         }))
         .filter((u) => !q || u.name.toLowerCase().includes(q));

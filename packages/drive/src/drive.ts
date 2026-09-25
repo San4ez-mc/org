@@ -635,6 +635,19 @@ export interface SheetRows {
  * Прочитати таблицю у структуровані рядки (на відміну від приватного readSheetText, що віддає текст для вектора).
  * `range` — A1 або назва аркуша; без нього беремо перший аркуш цілком.
  */
+/**
+ * Назви всіх аркушів таблиці.
+ *
+ * Клієнт веде дані не в одному аркуші: у Digital Hiring окремо ліди й окремо акт.
+ * Поки читався лише перший, асистент чесно казав «інших не бачу» — і половина
+ * таблиці була для нього невидимою.
+ */
+export async function listSheetTabs(spreadsheetId: string): Promise<string[]> {
+  const sheets = getSheets();
+  const meta = await withRetry(() => sheets.spreadsheets.get({ spreadsheetId }));
+  return (meta.data.sheets ?? []).map((s) => s.properties?.title ?? '').filter(Boolean);
+}
+
 export async function readSheetRows(spreadsheetId: string, range?: string): Promise<SheetRows> {
   const sheets = getSheets();
   let target = range;

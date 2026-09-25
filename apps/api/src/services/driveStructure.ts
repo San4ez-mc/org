@@ -78,7 +78,11 @@ export async function readStructure(companyId: string): Promise<{
   if (proposal?.structure?.length) {
     return {
       source: 'structure',
-      note: 'Обирай теку за descSystem. Немає відповідної — створи через drive_folder_upsert з описом.',
+      // Перше живе падіння було саме тут: тека була одна («Лонглисти»), і асистент
+      // поклав туди комерційну пропозицію — не тому, що вона підходила, а тому що
+      // інших не було. «Єдина» не означає «та сама».
+      note: 'Обирай теку за descSystem, а не за наявністю. Жодна не описує твій документ — '
+        + 'створи нову через drive_folder_upsert з описом; класти в невідповідну теку не можна.',
       folders: toTree(proposal.structure, '', appliedIds(proposal)),
     };
   }
