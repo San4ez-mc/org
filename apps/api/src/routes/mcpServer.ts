@@ -3,7 +3,8 @@ import { prisma } from '@platform/db';
 import { CANONICAL_DIVISIONS, findTemplate, templatesForPrompt } from '@platform/org-template';
 import { classifyPostDivision } from '../services/classifyDivision';
 import { vectorSearch } from '../services/vector';
-import { loadDriveScope, resolveWriteTarget, type DriveScope } from '../services/driveScope';
+import { loadDriveScope, type DriveScope } from '../services/driveScope';
+import { readStructure, resolveFolderByPath, upsertFolder } from '../services/driveStructure';
 import { runAsUser } from '@platform/drive';
 import { publishStructureToDrive } from '../services/publishStructure';
 import { generateInstructions } from '../services/generateInstructions';
@@ -85,15 +86,45 @@ const TOOLS = [
   {
     name: 'drive_write',
     domain: 'drive',
-    description: 'Створити або перезаписати документ на Drive компанії. Тека — одна з дозволених для запису.',
+    description: 'Створити або перезаписати документ на Drive компанії. Теку бери зі drive_structure.',
     inputSchema: {
       type: 'object',
       properties: {
-        folder: { type: 'string', description: 'Напр. 04_Згенеровано' },
+        folder: {
+          type: 'string',
+          description: 'Шлях теки зі drive_structure, напр. «Кандидати» або «Клієнти/Активні». Назви тек у кожного клієнта свої.',
+        },
         filename: { type: 'string' },
         content: { type: 'string' },
       },
       required: ['folder', 'filename', 'content'],
+    },
+  },
+  {
+    name: 'drive_structure',
+    domain: 'drive',
+    description:
+      'Теки клієнта з описами: descUser — що людина там тримає, descSystem — ключові слова, '
+      + 'за якими обирати теку для нового документа. Виклич ПЕРЕД drive_write: назви тек у '
+      + 'кожного клієнта свої, вгадувати їх не можна.',
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'drive_folder_upsert',
+    domain: 'drive',
+    description:
+      'Створити теку в межах теки запису і/або записати її опис. Користуйся, коли розібрався, '
+      + 'що де має лежати: наступного разу і ти, і колеги оберуть теку за цим описом, '
+      + 'а не питатимуть клієнта вдруге.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: 'Шлях від теки запису: «Кандидати» або «Клієнти/Активні».' },
+        descUser: { type: 'string', description: 'Одне речення для людини: що тут зберігаємо.' },
+        descSystem: { type: 'string', description: '3-7 ключових слів і типів документів — за ними обирається тека.' },
+        create: { type: 'boolean', description: 'false — лише описати наявну теку, не створювати нову.' },
+      },
+      required: ['path'],
     },
   },
   {
@@ -517,9 +548,22 @@ async function callTool(name: string, args: any, ctx: Ctx): Promise<unknown> {
 
     case 'drive_write': {
       // Перевірка серверна, а не в промпті: промпт модель може проігнорувати.
-      const folderId = await resolveWriteTarget(ctx.scope, String(args?.folder ?? ''));
+      // Шлях, а не пласка назва: у клієнта теки вкладені, і «Клієнти/Активні» —
+      // звичайна адреса, а не виняток.
+      const folderId = await resolveFolderByPath(ctx.companyId, String(args?.folder ?? ''));
       return writeFile(folderId, String(args?.filename ?? ''), String(args?.content ?? ''));
     }
+
+    case 'drive_structure':
+      return readStructure(ctx.companyId);
+
+    case 'drive_folder_upsert':
+      return upsertFolder(ctx.companyId, {
+        path: String(args?.path ?? ''),
+        descUser: args?.descUser === undefined ? undefined : String(args.descUser),
+        descSystem: args?.descSystem === undefined ? undefined : String(args.descSystem),
+        create: args?.create === undefined ? undefined : Boolean(args.create),
+      });
 
     case 'crm_search': {
       const sheet = await readSheetRows(needSheet());
@@ -561,14 +605,14 @@ ${templatesForPrompt()}`);
       const doc = await ensureDocumentTemplate(ctx.scope.writeFolderId, tpl.title, tpl.skeleton);
       return {
         kind: tpl.kind,
-        folder: tpl.folder,
         source: doc.own
           ? 'документ із теки клієнта — саме він джерело істини, навіть якщо відрізняється від базового'
           : 'щойно створена базова заготовка',
         editUrl: `https://docs.google.com/document/d/${doc.fileId}/edit`,
         structure: doc.text,
         note: 'Дотримайся цієї структури. Плейсхолдери у {{фігурних дужках}} заміни справжніми даними; '
-          + 'де даних немає — напиши «Потребує уточнення», а не вигадуй.',
+          + 'де даних немає — напиши «Потребує уточнення», а не вигадуй. '
+          + 'Куди покласти готове — дивись drive_structure: тека залежить від клієнта, а не від виду документа.',
       };
     }
 

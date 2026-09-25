@@ -18,8 +18,6 @@ export interface DocumentTemplate {
   title: string;
   /** Коли цей документ доречний — щоб асистент не плутав лонглист із довідкою. */
   when: string;
-  /** Куди класти готовий документ (тека з областей запису). */
-  folder: string;
   /** Сама заготовка. Маркдаун: при записі перетворюється на стилі Google Docs. */
   skeleton: string;
 }
@@ -29,7 +27,6 @@ export const DOCUMENT_TEMPLATES: DocumentTemplate[] = [
     kind: 'longlist',
     title: 'Шаблон — Лонглист кандидатів',
     when: 'клієнт просить підбірку кандидатів під вакансію',
-    folder: '03_Кандидати',
     skeleton: [
       '# Лонглист — {{вакансія}}',
       '',
@@ -60,7 +57,6 @@ export const DOCUMENT_TEMPLATES: DocumentTemplate[] = [
     kind: 'proposal',
     title: 'Шаблон — Комерційна пропозиція',
     when: 'клієнт просить КП або комерційну для потенційного замовника',
-    folder: '02_Клієнти',
     skeleton: [
       '# Комерційна пропозиція — {{замовник}}',
       '',
@@ -91,7 +87,6 @@ export const DOCUMENT_TEMPLATES: DocumentTemplate[] = [
     kind: 'candidate_brief',
     title: 'Шаблон — Довідка про кандидата',
     when: 'треба представити конкретного кандидата замовнику',
-    folder: '03_Кандидати',
     skeleton: [
       '# {{імʼя кандидата}} — {{роль}}',
       '',
@@ -130,5 +125,5 @@ export function findTemplate(kind: string): DocumentTemplate | undefined {
 
 /** Перелік для промпту: що взагалі можна зробити і коли. */
 export function templatesForPrompt(): string {
-  return DOCUMENT_TEMPLATES.map((t) => `${t.kind} — ${t.title}. Коли: ${t.when}. Тека: ${t.folder}.`).join('\n');
+  return DOCUMENT_TEMPLATES.map((t) => `${t.kind} — ${t.title}. Коли: ${t.when}.`).join('\n');
 }
