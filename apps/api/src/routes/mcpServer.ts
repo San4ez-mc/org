@@ -9,7 +9,7 @@ import { runAsUser } from '@platform/drive';
 import { publishStructureToDrive } from '../services/publishStructure';
 import { generateInstructions } from '../services/generateInstructions';
 import {
-  searchFiles, readFileById, writeFile, ensureDocumentTemplate,
+  searchFiles, searchFilesSmart, readFileById, writeFile, ensureDocumentTemplate,
   readSheetRows, listSheetTabs, updateSheetRow, appendSheetValues,
 } from '@platform/drive';
 
@@ -554,8 +554,16 @@ async function callTool(name: string, args: any, ctx: Ctx): Promise<unknown> {
   switch (name) {
     case 'drive_search': {
       // scanFolderId порожній = весь диск клієнта. На область запису це не впливає.
-      const files = await searchFiles(String(args?.query ?? ''), ctx.scope.scanFolderId, Number(args?.limit) || 20);
-      return { count: files.length, files };
+      const { files, tried } = await searchFilesSmart(String(args?.query ?? ''), ctx.scope.scanFolderId, Number(args?.limit) || 20);
+      return {
+        count: files.length,
+        files,
+        tried,
+        ...(files.length ? {} : {
+          note: 'Нічого не знайшлось цими словами. Спробуй інші: синонім, назву контрагента, '
+            + 'рік, тип документа. Не перекладай пошук на клієнта після першої спроби.',
+        }),
+      };
     }
     case 'drive_read':
       return readFileById(String(args?.fileId ?? ''));

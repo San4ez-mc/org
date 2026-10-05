@@ -567,6 +567,67 @@ async function searchScope(folderId?: string): Promise<{ corpora: string; driveI
  * Пошук файлів за назвою і вмістом. `folderId` обмежує видачу текою та її підтеками
  * (фільтруємо по факту — див. isDescendantOf).
  */
+/**
+ * Пошук кількома формулюваннями — бо з одного Drive регулярно віддає нуль.
+ *
+ * Живий випадок: власниця попросила «витяг про реєстрацію». На диску лежать
+ * «Витяг з ЄДР 2025.pdf» і «Виписка з ЄДР (з кодом).pdf», але запит її словами
+ * не знайшов нічого, і асистент відповів «не знайшла, підкажи назву» — тобто
+ * віддав роботу назад людині. Drive шукає за префіксами слів, тож «реєстрац»
+ * не ловить «реєстрація», а довга фраза не ловить нічого взагалі.
+ *
+ * Тому пробуємо по черзі: цілу фразу, кожне значуще слово, і корінь слова без
+ * українського закінчення. Повертаємо ще й перелік спроб — щоб асистент міг
+ * чесно сказати, що саме шукав, замість «нічого немає».
+ */
+const UA_ENDINGS = ['ування', 'ацію', 'ація', 'ації', 'ami', 'ння', 'ість', 'ами', 'ої', 'ий', 'ої', 'ом', 'ів', 'ах', 'ею', 'ці', 'ка', 'ку', 'и', 'я', 'у', 'а', 'е', 'і'];
+
+function stemUa(word: string): string {
+  const w = word.toLowerCase();
+  for (const end of UA_ENDINGS) {
+    if (w.length - end.length >= 4 && w.endsWith(end)) return w.slice(0, -end.length);
+  }
+  return w;
+}
+
+export interface SmartSearchResult {
+  files: (DriveSearchHit & { matchedBy?: 'назва' | 'вміст' })[];
+  tried: string[];
+}
+
+export async function searchFilesSmart(query: string, folderId?: string, limit = 20): Promise<SmartSearchResult> {
+  const raw = String(query ?? '').trim();
+  if (!raw) return { files: [], tried: [] };
+
+  const words = raw.split(/[\s,;/]+/).filter((w) => w.replace(/\W/g, '').length >= 3).slice(0, 4);
+  const variants: string[] = [raw];
+  for (const w of words) if (!variants.includes(w)) variants.push(w);
+  for (const w of words) {
+    const stem = stemUa(w);
+    if (stem.length >= 4 && !variants.some((v) => v.toLowerCase() === stem)) variants.push(stem);
+  }
+
+  const byId = new Map<string, DriveSearchHit & { matchedBy?: 'назва' | 'вміст' }>();
+  const tried: string[] = [];
+  for (const v of variants) {
+    if (byId.size >= limit) break;
+    tried.push(v);
+    let hits: DriveSearchHit[] = [];
+    try { hits = await searchFiles(v, folderId, limit); } catch { continue; }
+    for (const h of hits) {
+      if (byId.has(h.id)) continue;
+      byId.set(h.id, { ...h, matchedBy: h.name.toLowerCase().includes(v.toLowerCase()) ? 'назва' : 'вміст' });
+    }
+  }
+
+  // Збіг у назві важить більше за збіг десь усередині тексту: людина шукає документ,
+  // а не згадку про нього в чужому договорі.
+  const files = [...byId.values()]
+    .sort((a, b) => (a.matchedBy === b.matchedBy ? 0 : a.matchedBy === 'назва' ? -1 : 1))
+    .slice(0, limit);
+  return { files, tried };
+}
+
 export async function searchFiles(query: string, folderId?: string, limit = 20): Promise<DriveSearchHit[]> {
   const term = escapeName(String(query ?? '').trim());
   if (!term) return [];
