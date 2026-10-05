@@ -607,24 +607,30 @@ export async function searchFilesSmart(query: string, folderId?: string, limit =
     if (stem.length >= 4 && !variants.some((v) => v.toLowerCase() === stem)) variants.push(stem);
   }
 
-  const byId = new Map<string, DriveSearchHit & { matchedBy?: 'назва' | 'вміст' }>();
+  const byId = new Map<string, DriveSearchHit>();
   const tried: string[] = [];
   for (const v of variants) {
-    if (byId.size >= limit) break;
+    if (byId.size >= limit * 3) break; // із запасом: впорядкуємо нижче і обріжемо
     tried.push(v);
     let hits: DriveSearchHit[] = [];
     try { hits = await searchFiles(v, folderId, limit); } catch { continue; }
-    for (const h of hits) {
-      if (byId.has(h.id)) continue;
-      byId.set(h.id, { ...h, matchedBy: h.name.toLowerCase().includes(v.toLowerCase()) ? 'назва' : 'вміст' });
-    }
+    for (const h of hits) if (!byId.has(h.id)) byId.set(h.id, h);
   }
 
-  // Збіг у назві важить більше за збіг десь усередині тексту: людина шукає документ,
-  // а не згадку про нього в чужому договорі.
-  const files = [...byId.values()]
-    .sort((a, b) => (a.matchedBy === b.matchedBy ? 0 : a.matchedBy === 'назва' ? -1 : 1))
-    .slice(0, limit);
+  // Збіг у НАЗВІ важить більше за згадку десь у тексті: людина шукає документ, а не
+  // чужий договір, де він згадується. Рахуємо по словах і коренях, бо точної фрази
+  // в назві майже ніколи немає — «витяг про реєстрацію» проти «Витяг з ЄДР 2025».
+  const needles = [...new Set([...words.map((w) => w.toLowerCase()), ...words.map(stemUa)])]
+    .filter((w) => w.length >= 3);
+  const scored = [...byId.values()].map((h) => {
+    const name = h.name.toLowerCase();
+    const inName = needles.filter((n) => name.includes(n)).length;
+    return { ...h, matchedBy: (inName ? 'назва' : 'вміст') as 'назва' | 'вміст', score: inName };
+  });
+  const files = scored
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit)
+    .map(({ score, ...rest }) => rest);
   return { files, tried };
 }
 
