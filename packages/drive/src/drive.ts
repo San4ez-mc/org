@@ -599,7 +599,9 @@ export async function searchFilesSmart(query: string, folderId?: string, limit =
   const raw = String(query ?? '').trim();
   if (!raw) return { files: [], tried: [] };
 
-  const words = raw.split(/[\s,;/]+/).filter((w) => w.replace(/\W/g, '').length >= 3).slice(0, 4);
+  // \w у JS — це лише латиниця: з ним кирилиця відсіювалась повністю, і для
+  // україномовного запиту пробувалась тільки ціла фраза. Звідси й «не знайшла».
+  const words = raw.split(/[\s,;/]+/).filter((w) => w.replace(/[^\p{L}\p{N}]/gu, '').length >= 3).slice(0, 4);
   const variants: string[] = [raw];
   for (const w of words) if (!variants.includes(w)) variants.push(w);
   for (const w of words) {
