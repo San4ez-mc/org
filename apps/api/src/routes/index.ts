@@ -18,6 +18,7 @@ import { startDriveIndex, getIndexProgress } from '../services/driveIndexer';
 import { driveTools } from './driveTools';
 import { agentTools } from './agentTools';
 import { provenance } from './provenance';
+import { rules } from './rules';
 import { companyDriveContext, forgetCompanyDriveContext } from '../middleware/companyDriveContext';
 import { publishStructureToDrive } from '../services/publishStructure';
 import { ensureGroupArchiveDoc, appendToDoc } from '@platform/drive';
@@ -45,6 +46,9 @@ api.use('/agent-tools', agentTools);
 
 // Ф1: провенанс фактів і панель довіри.
 api.use(provenance);
+
+// Ф2: Rule Engine.
+api.use(rules);
 
 /** Записати зміну в журнал (не блокує основну дію). */
 async function logChange(companyId: string, entity: string, action: string, summary: string, author?: string, unitId?: string) {
