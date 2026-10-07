@@ -12,7 +12,7 @@ rules.get('/companies/:id/rules', async (req, res) => {
       prisma.orgUnit.findMany({
         where: { companyId },
         select: {
-          id: true, name: true, type: true, parentId: true, ckp: true, isVacant: true, reportsToUnitId: true,
+          id: true, name: true, type: true, parentId: true, ckp: true, isVacant: true, reportsToUnitId: true, holderName: true,
           _count: { select: { memberPosts: { where: { removedAt: null } } } },
         },
       }),
@@ -27,7 +27,8 @@ rules.get('/companies/:id/rules', async (req, res) => {
       }),
     ]);
     const violations = evaluateRules({
-      units: units.map((u) => ({ ...u, activeHolders: u._count.memberPosts })),
+      // Носій посади буває і в MemberPost, і лише текстом holderName (так пише асистент).
+      units: units.map((u) => ({ ...u, activeHolders: u._count.memberPosts + (u.holderName?.trim() ? 1 : 0) })),
       processes,
       members: members.map((m) => ({ id: m.id, name: `${m.firstName} ${m.lastName ?? ''}`.trim(), activePosts: m._count.posts })),
       disputedFacts: disputed,
