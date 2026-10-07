@@ -1,4 +1,5 @@
 import { recordFact } from './provenance';
+import { publishEvent } from '../services/eventBus';
 import { Router } from 'express';
 import { prisma } from '@platform/db';
 import { CANONICAL_DIVISIONS, findTemplate, templatesForPrompt } from '@platform/org-template';
@@ -537,6 +538,7 @@ async function collectGaps(ctx: Ctx): Promise<string[]> {
  * Це пропозиції, а не істина: статус proposed, доки людина не підтвердить.
  */
 async function trackUnitFacts(companyId: string, unitId: string, args: any) {
+  await publishEvent({ companyId, type: 'UNIT_UPSERTED', entityType: 'orgUnit', entityId: unitId });
   for (const field of ['name', 'ckp', 'holderName', 'reportsTo'] as const) {
     if (args?.[field] === undefined || args[field] === null || args[field] === '') continue;
     await recordFact({

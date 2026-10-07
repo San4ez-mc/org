@@ -19,6 +19,7 @@ import { driveTools } from './driveTools';
 import { agentTools } from './agentTools';
 import { provenance } from './provenance';
 import { rules } from './rules';
+import { publishEvent } from '../services/eventBus';
 import { companyDriveContext, forgetCompanyDriveContext } from '../middleware/companyDriveContext';
 import { publishStructureToDrive } from '../services/publishStructure';
 import { ensureGroupArchiveDoc, appendToDoc } from '@platform/drive';
@@ -53,7 +54,12 @@ api.use(rules);
 /** Записати зміну в журнал (не блокує основну дію). */
 async function logChange(companyId: string, entity: string, action: string, summary: string, author?: string, unitId?: string) {
   try {
-    await prisma.changeLog.create({ data: { companyId, entity, action, summary, author: author || 'пульт', unitId: unitId ?? null } });
+    const log = await prisma.changeLog.create({ data: { companyId, entity, action, summary, author: author || 'пульт', unitId: unitId ?? null } });
+    // Ф3: кожна зміна графа — подія шини; id запису журналу = ключ ідемпотентності.
+    await publishEvent({
+      companyId, type: `${entity.toUpperCase()}_CHANGED`, entityType: entity, entityId: unitId ?? null,
+      payload: { action, summary }, dedupeKey: `change:${log.id}`,
+    });
   } catch {
     /* ignore */
   }

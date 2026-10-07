@@ -118,6 +118,8 @@ model Company {
   embeddings   InstructionEmbedding[]
   changes      ChangeLog[]
   provenance   FactProvenance[]
+  orgEvents    OrgEvent[]
+  ruleRuns     RuleRun[]
   statistics   Statistic[]
   owners       Owner[]
 }
@@ -206,6 +208,43 @@ model FactProvenance {
   @@index([companyId, status])
   @@index([entityType, entityId])
   @@index([conflictGroup])
+}
+
+// ── Ф3: Event Bus (outbox у Postgres) ──
+// Кожна зміна графа → подія. dedupeKey UNIQUE: повторна публікація тієї самої події
+// (ретрай агента, подвійний клік) мовчки ігнорується — це і є ідемпотентність.
+model OrgEvent {
+  id          String    @id @default(uuid())
+  companyId   String
+  company     Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  type        String // STRUCTURE_CHANGED | PROCESS_CHANGED | INSTRUCTION_CHANGED | UNIT_UPSERTED | ...
+  entityType  String?
+  entityId    String?
+  payload     Json?
+  dedupeKey   String    @unique
+  status      String    @default("pending") // pending | processing | done | failed
+  attempts    Int       @default(0)
+  lastError   String?
+  createdAt   DateTime  @default(now())
+  claimedAt   DateTime?
+  processedAt DateTime?
+
+  @@index([status, createdAt])
+  @@index([companyId, createdAt])
+}
+
+// Знімок прогону Rule Engine: за ним видно, що з'явилось нового між прогонами.
+model RuleRun {
+  id        String   @id @default(uuid())
+  companyId String
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  total     Int
+  errors    Int
+  warnings  Int
+  keys      String[] // "rule:entityId" кожного порушення
+  createdAt DateTime @default(now())
+
+  @@index([companyId, createdAt])
 }
 
 // ── Статистики по ЦКП (адмін-технологія: вимірюваний показник одиниці + тренд) ──

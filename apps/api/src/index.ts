@@ -4,6 +4,7 @@ import { prisma } from '@platform/db';
 import { api } from './routes';
 import { ssoCatalog } from './routes/ssoCatalog';
 import { mcpServer } from './routes/mcpServer';
+import { startEventLoop } from './services/eventBus';
 
 const app = express();
 app.use(express.json({ limit: '10mb' }));
@@ -33,4 +34,5 @@ const host = process.env.API_HOST ?? '127.0.0.1';
 app.listen(port, host, () => {
   // eslint-disable-next-line no-console
   console.log(`[api] Жива Орг.Платформа слухає на ${host}:${port}`);
+  startEventLoop();
 });
