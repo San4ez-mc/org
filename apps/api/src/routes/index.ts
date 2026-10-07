@@ -17,6 +17,7 @@ import { indexInstruction, findRelatedInstructions, indexDriveDocuments, vectorE
 import { startDriveIndex, getIndexProgress } from '../services/driveIndexer';
 import { driveTools } from './driveTools';
 import { agentTools } from './agentTools';
+import { provenance } from './provenance';
 import { companyDriveContext, forgetCompanyDriveContext } from '../middleware/companyDriveContext';
 import { publishStructureToDrive } from '../services/publishStructure';
 import { ensureGroupArchiveDoc, appendToDoc } from '@platform/drive';
@@ -41,6 +42,9 @@ api.use('/drive', driveTools);
 
 // Інструменти бота над орг-структурою (читання, посади, теки).
 api.use('/agent-tools', agentTools);
+
+// Ф1: провенанс фактів і панель довіри.
+api.use(provenance);
 
 /** Записати зміну в журнал (не блокує основну дію). */
 async function logChange(companyId: string, entity: string, action: string, summary: string, author?: string, unitId?: string) {

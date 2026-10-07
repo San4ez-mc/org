@@ -117,6 +117,7 @@ model Company {
   proposals    Proposal[]
   embeddings   InstructionEmbedding[]
   changes      ChangeLog[]
+  provenance   FactProvenance[]
   statistics   Statistic[]
   owners       Owner[]
 }
@@ -177,6 +178,34 @@ model OrgUnit {
   @@index([companyId])
   @@index([parentId])
   @@index([companyId, type])
+}
+
+// ── Ф1: провенанс фактів (хто сказав, чи підтверджено, чи є розбіжність) ──
+// Окрема таблиця, а не колонки в кожній моделі: адитивно, наявні зв'язки не ламаються.
+// Один рядок = одне твердження про поле сутності від одного джерела. Кілька рядків
+// на те саме (entityType, entityId, field) від різних джерел = кандидат на конфлікт (Ф5).
+model FactProvenance {
+  id            String   @id @default(uuid())
+  companyId     String
+  company       Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  entityType    String // 'orgUnit' | 'process' | 'instruction' | 'member' | 'statistic' | 'company'
+  entityId      String
+  field         String? // яке поле стосується; null = факт про сутність загалом
+  value         String? // що саме стверджується (текст, для порівняння джерел)
+  sourceType    String // owner | head | employee | document | agent | admin
+  sourceId      String? // memberId / id документа / ім'я агента
+  statedAt      DateTime @default(now())
+  confidence    Float? // 0..1, якщо джерело — модель
+  status        String   @default("unconfirmed") // proposed | approved | disputed | unconfirmed
+  approvedBy    String?
+  approvedAt    DateTime?
+  conflictGroup String? // спільний id для суперечливих тверджень (Ф5)
+  confidential  Boolean  @default(false) // тихий канал (Ф4): бачить лише супер-адмін
+  createdAt     DateTime @default(now())
+
+  @@index([companyId, status])
+  @@index([entityType, entityId])
+  @@index([conflictGroup])
 }
 
 // ── Статистики по ЦКП (адмін-технологія: вимірюваний показник одиниці + тренд) ──

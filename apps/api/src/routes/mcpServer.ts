@@ -1,3 +1,4 @@
+import { recordFact } from './provenance';
 import { Router } from 'express';
 import { prisma } from '@platform/db';
 import { CANONICAL_DIVISIONS, findTemplate, templatesForPrompt } from '@platform/org-template';
@@ -531,6 +532,25 @@ async function collectGaps(ctx: Ctx): Promise<string[]> {
 }
 
 /** Знайти посаду за назвою в межах компанії — модель оперує назвами, не id. */
+/**
+ * Ф1: що асистент щойно записав — фіксуємо як твердження з джерелом «agent».
+ * Це пропозиції, а не істина: статус proposed, доки людина не підтвердить.
+ */
+async function trackUnitFacts(companyId: string, unitId: string, args: any) {
+  for (const field of ['name', 'ckp', 'holderName', 'reportsTo'] as const) {
+    if (args?.[field] === undefined || args[field] === null || args[field] === '') continue;
+    await recordFact({
+      companyId,
+      entityType: 'orgUnit',
+      entityId: unitId,
+      field,
+      value: String(args[field]),
+      sourceType: 'agent',
+      sourceId: 'org-assistant',
+    });
+  }
+}
+
 async function resolveReportsTo(companyId: string, name: unknown): Promise<string | null> {
   const q = String(name ?? '').trim();
   if (!q) return null;
@@ -743,6 +763,7 @@ ${templatesForPrompt()}`);
           },
           select: { id: true, name: true, type: true, holderName: true },
         });
+        await trackUnitFacts(ctx.companyId, updated.id, args);
         return { ok: true, mode: 'update', unit: updated };
       }
       // Без батька посада «зависає» і при публікації падає в адміністративне
@@ -775,6 +796,7 @@ ${templatesForPrompt()}`);
           },
           select: { id: true, name: true, type: true, holderName: true },
         });
+        await trackUnitFacts(ctx.companyId, updated.id, args);
         return { ok: true, mode: 'update', unit: updated };
       }
 
@@ -851,6 +873,7 @@ ${templatesForPrompt()}`);
       // Куди саме лягла посада — повертаємо словами, щоб асистент міг сказати це
       // клієнту («віднесла до технічного, бо це те, за що платять замовники»)
       // і клієнт мав шанс заперечити, поки структура ще маленька.
+      await trackUnitFacts(ctx.companyId, created.id, args);
       return { ok: true, mode: 'create', unit: created, ...(placement && { placement }) };
     }
 
