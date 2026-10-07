@@ -26,8 +26,9 @@ const STALE_CLAIM_MS = 5 * 60_000;
 
 export async function publishEvent(e: OrgEventInput): Promise<boolean> {
   try {
-    await prisma.orgEvent.create({
-      data: {
+    // skipDuplicates: дубль по dedupeKey — штатна ситуація, а не помилка (без шуму в логах).
+    const r = await prisma.orgEvent.createMany({
+      data: [{
         companyId: e.companyId,
         type: e.type,
         entityType: e.entityType ?? null,
@@ -35,11 +36,11 @@ export async function publishEvent(e: OrgEventInput): Promise<boolean> {
         payload: (e.payload ?? undefined) as any,
         dedupeKey:
           e.dedupeKey ?? `${e.companyId}:${e.type}:${e.entityId ?? ''}:${Math.floor(Date.now() / WINDOW_MS)}`,
-      },
+      }],
+      skipDuplicates: true,
     });
-    return true;
-  } catch (err: any) {
-    if (err?.code === 'P2002') return false; // дубль — очікувано
+    return r.count > 0;
+  } catch {
     return false;
   }
 }
