@@ -20,7 +20,7 @@
 - [~] Ф1 Провенанс і статуси фактів: модель `FactProvenance`, API `/provenance`, `/trust`, запис з `org_unit_upsert` — у коді; НЕ задеплоєно (потрібен `db push` на проді). Лишилось: UI панелі довіри, провенанс для процесів/інструкцій/працівників, дедуп повторів
 - [~] Ф2 Rule Engine: `services/ruleEngine.ts` (10 правил) + `GET /companies/:id/rules` — задеплоєно. Лишилось: UI, підключити health/Delivery до нього
 - [~] Ф3 Event Bus: outbox `OrgEvent` (dedupeKey UNIQUE), споживач у org-api, підписник = перерахунок правил + сповіщення про нові помилки (`RuleRun`), `GET /companies/:id/events` і `/rules/history` — задеплоєно. Лишилось: підписники-індексатор вектора і propagate; фоновий добовий прогін; UI
-- [ ] Ф4 Черга затвердження «підлеглий → керівник»; тихий канал (REDFLAG); Document Reader для неструктурованих
+- [~] Ф4: ✅ тихий канал (`RedFlag`, `/me/:token/redflag`, `/admin/redflags` + ключ `ORG_ADMIN_KEY`, сторінка `/redflags` лише супер-адміну) — задеплоєно. ⬜ лишилось: черга затвердження «підлеглий → керівник», Document Reader для неструктурованих документів, прапорець через Telegram-бота
 - [ ] Ф5 Розбіжність джерел (SOURCE_DISAGREEMENT) + чекліст повноти (coverage map)
 - [ ] Ф6 Delivery Engine E1–E6 + панель контролю
 
