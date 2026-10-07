@@ -3,7 +3,7 @@ import { usePathname } from 'next/navigation';
 
 interface Item { icon: string; label: string; href: string; active: boolean }
 
-export default function Sidebar() {
+export default function Sidebar({ isSuperadmin }: { isSuperadmin?: boolean }) {
   const path = usePathname() || '/';
   const m = path.match(/^\/company\/([^/]+)/);
   const companyId = m?.[1];
@@ -12,6 +12,8 @@ export default function Sidebar() {
   const globalItems: Item[] = [
     { icon: '🏢', label: 'Компанії', href: '/', active: path === '/' },
     { icon: '🩺', label: 'Логи', href: '/logs', active: path === '/logs' },
+    // Тихий канал: пункт існує лише для супер-адміна (Ф4).
+    ...(isSuperadmin ? [{ icon: '🔒', label: 'Тихий канал', href: '/redflags', active: path === '/redflags' }] : []),
   ];
 
   // Пункти компанії — з'являються ЛИШЕ після вибору компанії

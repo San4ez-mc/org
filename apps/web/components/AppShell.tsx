@@ -9,10 +9,12 @@ export default function AppShell({
   companies,
   children,
   user,
+  isSuperadmin,
 }: {
   companies: Company[];
   children: ReactNode;
   user?: { name: string; email: string } | null;
+  isSuperadmin?: boolean;
 }) {
   const path = usePathname() || '/';
   if (path.startsWith('/login') || path.startsWith('/me')) return <>{children}</>;
@@ -21,7 +23,7 @@ export default function AppShell({
     <>
       <TopBar companies={companies} user={user} />
       <div style={{ display: 'flex', minHeight: 'calc(100vh - 44px)' }}>
-        <Sidebar />
+        <Sidebar isSuperadmin={isSuperadmin} />
         <main style={{ flex: 1, minWidth: 0, padding: '10px 24px', overflowX: 'auto' }}>{children}</main>
       </div>
     </>

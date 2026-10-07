@@ -247,6 +247,26 @@ model RuleRun {
   @@index([companyId, createdAt])
 }
 
+// ── Ф4: тихий канал. Працівник сигналізує напряму супер-адміну, повз ієрархію. ──
+// ІЗОЛЬОВАНО навмисно: окрема таблиця БЕЗ звʼязку з Company/Member (немає каскадів і
+// include-ів, що могли б протягти це у звичайні запити), без ChangeLog, без OrgEvent,
+// без OrgNotification, поза експортом. Читається лише через /admin/redflags з окремим ключем.
+model RedFlag {
+  id         String    @id @default(uuid())
+  companyId  String
+  memberId   String? // хто повідомив (бачить лише супер-адмін)
+  entityType String? // про що: 'process' | 'orgUnit' | ...
+  entityId   String?
+  text       String
+  status     String    @default("open") // open | checking | closed | dismissed
+  adminNote  String?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  @@index([status, createdAt])
+  @@index([companyId])
+}
+
 // ── Статистики по ЦКП (адмін-технологія: вимірюваний показник одиниці + тренд) ──
 model Statistic {
   id        String   @id @default(uuid())

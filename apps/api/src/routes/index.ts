@@ -19,6 +19,7 @@ import { driveTools } from './driveTools';
 import { agentTools } from './agentTools';
 import { provenance } from './provenance';
 import { rules } from './rules';
+import { redflags } from './redflags';
 import { publishEvent } from '../services/eventBus';
 import { companyDriveContext, forgetCompanyDriveContext } from '../middleware/companyDriveContext';
 import { publishStructureToDrive } from '../services/publishStructure';
@@ -50,6 +51,9 @@ api.use(provenance);
 
 // Ф2: Rule Engine.
 api.use(rules);
+
+// Ф4: тихий канал (ізольований, окремий ключ).
+api.use(redflags);
 
 /** Записати зміну в журнал (не блокує основну дію). */
 async function logChange(companyId: string, entity: string, action: string, summary: string, author?: string, unitId?: string) {

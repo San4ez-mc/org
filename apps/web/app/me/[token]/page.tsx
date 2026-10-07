@@ -1,5 +1,6 @@
 import { getMe } from '@/lib/api';
 import MyProfileForm from '@/components/MyProfileForm';
+import RedFlagForm from '@/components/RedFlagForm';
 
 export const dynamic = 'force-dynamic';
 
@@ -117,6 +118,8 @@ export default async function MePage({ params }: { params: { token: string } }) 
           </div>
         )}
       </section>
+
+      <RedFlagForm token={params.token} />
 
       <div style={{ marginTop: 28, fontSize: 11.5, ...muted, textAlign: 'center' }}>
         🧬 Жива Орг.Платформа · особиста сторінка. Не діліться цим посиланням — воно дає доступ до ваших даних.
